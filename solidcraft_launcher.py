@@ -27,12 +27,12 @@ import urllib.parse
 import urllib.request
 import webbrowser
 
-from PySide6.QtCore import QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QIcon, QImage, QPixmap, QTextCursor, QTextDocument
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QFont, QIcon, QImage, QPixmap, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout,
     QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox,
-    QProgressBar, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QTabWidget,
+    QProgressBar, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QTabBar, QTabWidget,
     QTextBrowser, QTextEdit, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -48,8 +48,8 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_INSTALL_DIR = os.path.join(HOME, "Applications", "SolidCraft")
 DEFAULT_SCAN_DIR = os.path.join(HOME, "CAD")
 CACHE_DIR = os.path.join(HOME, ".cache", "solidcraft-launcher")
-LOCK_FILE = os.path.join(HOME, ".solidcraft_launcher.lock")
-BUILD_LOG_FILE = os.path.join(HOME, ".solidcraft_launcher_build.log")
+LOCK_FILE = os.path.join(CACHE_DIR, "launcher.lock")
+BUILD_LOG_FILE = os.path.join(CACHE_DIR, "build.log")
 APPS_DIR = os.path.join(HOME, ".local", "share", "applications")
 SOLIDCRAFT_PREFS = os.path.join(HOME, ".local", "share", "solidcraft", "app.ron")
 
@@ -148,112 +148,194 @@ def fmt_duration(sec):
     return f"{sec // 3600}h {(sec % 3600) // 60:02d}m"
 
 
-# ---------- Theme (adapted from FreeCAD Smart Launcher, MIT) ----------
+# ---------- Theme: SolidCraft's own palette, fonts and icons ----------
+# Colours are SolidCraft's design tokens (assets/styles/ui/palettes.rs and sampled from the app);
+# fonts are the IBM Plex faces it bundles; icons are its line icons plus a few drawn to match.
 
 DARK = {
-    "bg": "#121316", "card": "#1C1D21", "input": "#16171A", "accent": "#3B82F6",
-    "success": "#22C55E", "danger": "#EF4444", "warning": "#EAB308", "neutral": "#2A2B30",
-    "neutral_dk": "#3A3B41", "text": "#E8E8EC", "muted": "#8B8B96", "link": "#6BA3F7",
-    "error": "#F87171", "footer": "#6B6B76", "border": "#2E2F35", "hover": "#32333A",
-    "text_area_bg": "#0E0F12", "text_area_fg": "#D4D4D8",
+    "app_bar": "#1c1f26", "app_bar_text": "#e6eaf2", "app_bar_sep": "#3f4552", "app_bar_hover": "#2b2f37",
+    "bg": "#1f232b", "card": "#272b34", "header": "#2f343e", "border": "#3f4552", "rule": "#353b47",
+    "text": "#dee2e8", "dim": "#949ba8", "accent": "#3a88ee", "primary": "#3a88ee", "primary_hover": "#5098f0",
+    "accent_soft": "#2a466e", "selected_ink": "#9cc7f5", "control": "#1c1f26", "control_border": "#4a5262",
+    "field": "#1e2229", "hover": "#363d4a", "error": "#f06460", "warning": "#ecaa46",
+    "ok_bg": "#2c4a33", "ok_ink": "#8fd19e", "warn_bg": "#43331c", "warn_ink": "#f5cc89",
+    "pill_bg": "#2f343e", "merged": "#b39bee", "card_hi": "#1b3048", "card_hi_border": "#2a5c9b",
 }
 LIGHT = {
-    "bg": "#F0F1F3", "card": "#FFFFFF", "input": "#F7F8F9", "accent": "#2563EB",
-    "success": "#16A34A", "danger": "#DC2626", "warning": "#CA8A04", "neutral": "#E8E9EC",
-    "neutral_dk": "#D5D6DB", "text": "#1A1B1E", "muted": "#6B6B76", "link": "#2563EB",
-    "error": "#DC2626", "footer": "#6B6B76", "border": "#D8D9DE", "hover": "#ECEDEF",
-    "text_area_bg": "#FAFBFC", "text_area_fg": "#1A1B1E",
+    "app_bar": "#343840", "app_bar_text": "#e6eaf2", "app_bar_sep": "#4f5562", "app_bar_hover": "#40454e",
+    "bg": "#f7f9fb", "card": "#ffffff", "header": "#eceef2", "border": "#e0e5ec", "rule": "#e6eaf0",
+    "text": "#262a32", "dim": "#6e7480", "accent": "#2678da", "primary": "#236ead", "primary_hover": "#2b78b8",
+    "accent_soft": "#e8f1fa", "selected_ink": "#1a507f", "control": "#ffffff", "control_border": "#c3cbd6",
+    "field": "#ffffff", "hover": "#e2eaf6", "error": "#d63636", "warning": "#de961e",
+    "ok_bg": "#e5f2e6", "ok_ink": "#276b2c", "warn_bg": "#fff6e5", "warn_ink": "#7a4a05",
+    "pill_bg": "#eceef2", "merged": "#7349cd", "card_hi": "#e3f0fb", "card_hi_border": "#328bd3",
 }
+
+SANS = "IBM Plex Sans"
+MONO = "IBM Plex Mono"
 
 
 def theme(dark):
     return DARK if dark else LIGHT
 
 
-def chevron_icon():
-    path = os.path.join(CACHE_DIR, "chevron_down.svg")
-    if not os.path.exists(path):
-        try:
-            os.makedirs(CACHE_DIR, exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
-                f.write('<svg xmlns="http://www.w3.org/2000/svg" width="12" height="8" viewBox="0 0 12 8">'
-                        '<path d="M1 1.5 L6 6.5 L11 1.5" fill="none" stroke="#C4C4C8" stroke-width="1.8" '
-                        'stroke-linecap="round" stroke-linejoin="round"/></svg>')
-        except OSError:
-            return ""
-    return path
+def asset(*parts):
+    """A bundled file: next to the script, or inside the packaged app."""
+    for base in (SCRIPT_DIR, getattr(sys, "_MEIPASS", SCRIPT_DIR)):
+        p = os.path.join(base, "assets", *parts)
+        if os.path.exists(p):
+            return p
+    return None
+
+
+def load_fonts():
+    """Register SolidCraft's IBM Plex faces; fall back to the system sans if they're missing."""
+    global SANS, MONO
+    from PySide6.QtGui import QFontDatabase
+    for name, var in (("IBMPlexSans-Variable.ttf", "SANS"), ("IBMPlexMono-Regular.ttf", "MONO")):
+        p = asset("fonts", name)
+        fid = QFontDatabase.addApplicationFont(p) if p else -1
+        families = QFontDatabase.applicationFontFamilies(fid) if fid != -1 else []
+        if families:
+            globals()[var] = families[0]
+
+
+# Real interface weights from the variable font (Qt ignores font-weight for it; the wght axis works).
+WEIGHTS = {"appTitle": 600, "strong": 600, "heading": 600, "prNumber": 600, "sectionTitle": 600, "primary": 600,
+           "pillOk": 600, "pillWarn": 600, "pillMuted": 600, "pillMerged": 600, "pillError": 600}
+
+
+class WeightFilter(QObject):
+    """Gives each widget SolidCraft's weight for its role as it is polished (styled)."""
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Polish and isinstance(obj, QWidget):
+            weight = WEIGHTS.get(obj.objectName())
+            if weight is None and isinstance(obj, (QPushButton, QTabBar)):
+                weight = 500
+            if weight is not None:
+                f = obj.font()
+                f.setVariableAxis(QFont.Tag("wght"), weight)
+                obj.setFont(f)
+        return False
+
+
+def tinted_svg(name, color):
+    """SolidCraft icons draw in currentColor: return a copy of the SVG in `color` (cached file path)."""
+    src = asset("icons", f"{name}.svg")
+    if not src:
+        return ""
+    out = os.path.join(CACHE_DIR, "icons", f"{name}-{color.lstrip('#')}.svg")
+    if not os.path.exists(out):
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        with open(src, encoding="utf-8") as f, open(out, "w", encoding="utf-8") as g:
+            g.write(f.read().replace("currentColor", color))
+    return out
+
+
+def icon(name, color):
+    p = tinted_svg(name, color)
+    return QIcon(p) if p else QIcon()
 
 
 def make_qss(dark):
     t = theme(dark)
-    chev = chevron_icon()
-    arrow = f'image: url("{chev}");' if chev else "width: 0; height: 0;"
-    btn = {  # (bg, fg, border, hover bg, hover border) per role
-        "accent": ("#3A5F8A", "#FFFFFF", "#2E4D70", "#4A6F9A", "#6BA3F7") if dark else ("#C5D4E8", "#1A2A3A", "#9AB0C8", "#B0C4DC", "#3B82F6"),
-        "success": ("#3D6B4F", "#FFFFFF", "#325A42", "#4A7A5C", "#4ADE80") if dark else ("#C5D9C8", "#1A2A1A", "#9AB89A", "#B0C8B4", "#16A34A"),
-        "danger": ("#8A4545", "#FFFFFF", "#703838", "#9A5555", "#F87171") if dark else ("#E8C8C8", "#3A1A1A", "#C8A0A0", "#D8B0B0", "#DC2626"),
-        "warning": ("#8A7040", "#F5F0E0", "#705830", "#9A8050", "#FBBF24") if dark else ("#E8DCC0", "#2A2418", "#C8B890", "#D8CCB0", "#CA8A04"),
-    }
-    roles = "".join(
-        f"QPushButton#{r} {{ background-color: {bg}; color: {fg}; border: 1px solid {bd}; }}"
-        f"QPushButton#{r}:hover {{ background-color: {hbg}; border: 1px solid {hbd}; }}"
-        for r, (bg, fg, bd, hbg, hbd) in btn.items()
-    )
+    chev = tinted_svg("chevron", t["dim"])
+    tick = tinted_svg("check", "#ffffff")
     return f"""
-    * {{ font-family: "Inter", "Noto Sans", sans-serif; }}
-    QMainWindow, QDialog {{ background-color: {t['bg']}; color: {t['text']}; font-size: 12.5px; }}
+    * {{ font-family: "{SANS}"; }}
+    QMainWindow, QDialog {{ background-color: {t['bg']}; color: {t['text']}; }}
+    QDialog {{ background-color: {t['card']}; }}
     QWidget {{ color: {t['text']}; font-size: 12.5px; }}
-    QFrame#card {{ background-color: {t['card']}; border-radius: 8px; border: 1px solid {t['border']}; }}
-    QLabel {{ color: {t['text']}; background: transparent; }}
-    QLabel#sectionTitle {{ font-size: 10.5px; font-weight: 700; color: {t['muted']}; letter-spacing: 1.1px; }}
-    QLabel#muted {{ color: {t['muted']}; font-size: 11.5px; }}
-    QLabel#statusOk {{ color: {t['success']}; font-size: 11px; font-weight: 600; }}
-    QLabel#statusWarn {{ color: {t['warning']}; font-size: 11px; font-weight: 600; }}
-    QLabel#footer {{ color: {t['footer']}; font-style: italic; font-size: 11.5px; }}
-    QPushButton {{ background-color: {t['neutral']}; color: {t['text']}; border: 1px solid {t['border']};
-        border-radius: 5px; padding: 4px 11px; font-weight: 600; font-size: 11.5px; min-height: 22px; max-height: 28px; }}
-    QPushButton:hover {{ background-color: {t['hover']}; border-color: {t['muted']}; }}
-    QPushButton:pressed {{ background-color: {t['neutral_dk']}; }}
-    QPushButton:disabled {{ background-color: {t['bg']}; color: {t['muted']}; border-color: {t['border']}; }}
-    {roles}
-    QLineEdit, QComboBox {{ background-color: {t['input']}; color: {t['text']}; border: 1px solid {t['border']};
-        border-radius: 5px; padding: 4px 8px; min-height: 24px; selection-background-color: {t['accent']}; }}
-    QLineEdit:focus, QComboBox:focus {{ border-color: {t['accent']}; }}
-    QComboBox:hover {{ border-color: {t['muted']}; }}
-    QComboBox::drop-down {{ subcontrol-origin: padding; subcontrol-position: top right; width: 26px; border: none;
-        border-left: 1px solid {t['border']}; background-color: {t['neutral']};
-        border-top-right-radius: 5px; border-bottom-right-radius: 5px; }}
-    QComboBox::down-arrow {{ {arrow} width: 11px; height: 7px; margin-right: 2px; }}
-    QComboBox QAbstractItemView {{ background-color: {t['card']}; color: {t['text']};
-        selection-background-color: {t['accent']}; border: 1px solid {t['border']}; outline: none; padding: 3px; }}
-    QListWidget, QTreeWidget {{ background-color: {t['input']}; color: {t['text']}; border: 1px solid {t['border']};
-        border-radius: 5px; outline: none; padding: 3px; }}
-    QListWidget::item {{ padding: 5px 8px; border-radius: 4px; }}
-    QListWidget::item:selected, QTreeWidget::item:selected {{ background-color: {t['accent']}; color: white; }}
+    QToolTip {{ background-color: {t['card']}; color: {t['text']}; border: 1px solid {t['border']}; padding: 4px 6px; }}
+
+    QWidget#appBar {{ background-color: {t['app_bar']}; }}
+    QWidget#appBar QLabel {{ color: {t['app_bar_text']}; }}
+    QLabel#appTitle {{ font-size: 13px; font-weight: 600; }}
+    QLabel#appVersion {{ color: {t['dim']}; font-size: 11.5px; }}
+    QFrame#appSep {{ background-color: {t['app_bar_sep']}; }}
+    QPushButton#appBarButton {{ background: transparent; color: {t['app_bar_text']}; border: 1px solid {t['app_bar_sep']};
+        border-radius: 4px; padding: 2px 10px; min-height: 22px; font-weight: 500; }}
+    QPushButton#appBarButton:hover {{ background-color: {t['app_bar_hover']}; }}
+
+    QFrame#card {{ background-color: {t['card']}; border: 1px solid {t['border']}; border-radius: 8px; }}
+    QFrame#rule {{ background-color: {t['rule']}; border: none; }}
+    QFrame#field {{ background-color: {t['field']}; border: 1px solid {t['border']}; border-radius: 8px; }}
+    QLabel {{ background: transparent; }}
+    QLabel#sectionTitle {{ color: {t['dim']}; font-size: 10.5px; font-weight: 600; letter-spacing: 0.4px; }}
+    QLabel#heading {{ font-size: 15px; font-weight: 600; }}
+    QLabel#strong {{ font-weight: 600; }}
+    QLabel#muted {{ color: {t['dim']}; font-size: 11.5px; }}
+    QLabel#mono {{ color: {t['dim']}; font-family: "{MONO}"; font-size: 11.5px; }}
+    QLabel#prNumber {{ color: {t['accent']}; font-weight: 600; }}
+    QLabel#footer {{ color: {t['dim']}; font-size: 11.5px; }}
+    QLabel#pillOk, QLabel#pillWarn, QLabel#pillMuted, QLabel#pillMerged, QLabel#pillError {{
+        border-radius: 9px; padding: 1px 8px; font-size: 11px; font-weight: 600; }}
+    QLabel#pillOk {{ background-color: {t['ok_bg']}; color: {t['ok_ink']}; }}
+    QLabel#pillWarn {{ background-color: {t['warn_bg']}; color: {t['warn_ink']}; }}
+    QLabel#pillMuted {{ background-color: {t['pill_bg']}; color: {t['dim']}; }}
+    QLabel#pillMerged {{ background-color: {t['pill_bg']}; color: {t['merged']}; }}
+    QLabel#pillError {{ background-color: {t['pill_bg']}; color: {t['error']}; }}
+
+    QPushButton {{ background-color: {t['control']}; color: {t['text']}; border: 1px solid {t['control_border']};
+        border-radius: 6px; padding: 0 12px; min-height: 26px; max-height: 26px; font-size: 12.5px; font-weight: 500; }}
+    QPushButton:hover {{ background-color: {t['hover']}; }}
+    QPushButton:pressed {{ background-color: {t['accent_soft']}; }}
+    QPushButton:disabled {{ color: {t['dim']}; border-color: {t['rule']}; background-color: {t['card']}; }}
+    QPushButton#primary {{ background-color: {t['primary']}; border-color: {t['primary']}; color: #ffffff; font-weight: 600; }}
+    QPushButton#primary:hover {{ background-color: {t['primary_hover']}; border-color: {t['primary_hover']}; }}
+    QPushButton#primary:disabled {{ background-color: {t['accent_soft']}; border-color: {t['accent_soft']}; color: {t['dim']}; }}
+    QPushButton#danger {{ color: {t['error']}; }}
+    QPushButton#ghost {{ background: transparent; border: 1px solid transparent; padding: 0 6px; }}
+    QPushButton#ghost:hover {{ background-color: {t['hover']}; }}
+    QPushButton#small {{ min-height: 22px; max-height: 22px; padding: 0 9px; font-size: 11.5px; }}
+
+    QLineEdit, QComboBox {{ background-color: {t['control']}; color: {t['text']}; border: 1px solid {t['control_border']};
+        border-radius: 6px; padding: 0 8px; min-height: 26px; selection-background-color: {t['accent_soft']};
+        selection-color: {t['selected_ink']}; }}
+    QLineEdit:focus, QComboBox:focus, QComboBox:on {{ border-color: {t['accent']}; }}
+    QComboBox::drop-down {{ border: none; width: 24px; }}
+    QComboBox::down-arrow {{ image: url("{chev}"); width: 14px; height: 14px; }}
+    QComboBox QAbstractItemView {{ background-color: {t['card']}; color: {t['text']}; border: 1px solid {t['border']};
+        selection-background-color: {t['accent_soft']}; selection-color: {t['selected_ink']}; outline: none; padding: 4px; }}
+
+    QListWidget {{ background-color: {t['card']}; border: 1px solid {t['border']}; border-radius: 8px; outline: none; padding: 4px; }}
+    QListWidget::item {{ border-radius: 6px; padding: 0; }}
     QListWidget::item:hover {{ background-color: {t['hover']}; }}
-    QCheckBox {{ color: {t['text']}; spacing: 8px; background: transparent; font-size: 12px; }}
-    QCheckBox::indicator {{ width: 15px; height: 15px; border-radius: 3px; border: 1px solid {t['border']}; background: {t['input']}; }}
-    QCheckBox::indicator:checked {{ background-color: {t['accent']}; border-color: {t['accent']}; }}
-    QTabWidget::pane {{ border: 1px solid {t['border']}; border-radius: 6px; background: {t['card']}; top: -1px; }}
-    QTabBar::tab {{ background: transparent; color: {t['muted']}; padding: 6px 14px; margin-right: 1px;
-        border-top-left-radius: 5px; border-top-right-radius: 5px; font-weight: 600; font-size: 11.5px; border: 1px solid transparent; }}
-    QTabBar::tab:selected {{ background: {t['card']}; color: {t['text']}; border: 1px solid {t['border']}; border-bottom-color: {t['card']}; }}
-    QTabBar::tab:hover:!selected {{ color: {t['text']}; background: {t['hover']}; }}
+    QListWidget::item:selected {{ background-color: {t['accent_soft']}; color: {t['selected_ink']}; }}
+    QTreeWidget {{ background-color: {t['card']}; border: 1px solid {t['border']}; border-radius: 8px; outline: none; }}
+    QTreeWidget::item {{ padding: 4px 2px; }}
+    QTreeWidget::item:selected {{ background-color: {t['accent_soft']}; color: {t['selected_ink']}; }}
+    QHeaderView::section {{ background-color: {t['header']}; color: {t['dim']}; padding: 6px 8px; border: none;
+        font-size: 10.5px; font-weight: 600; }}
+
+    QCheckBox {{ spacing: 8px; background: transparent; }}
+    QCheckBox::indicator {{ width: 14px; height: 14px; border-radius: 3px; border: 1px solid {t['control_border']};
+        background: {t['control']}; }}
+    QCheckBox::indicator:hover {{ border-color: {t['accent']}; }}
+    QCheckBox::indicator:checked {{ background-color: {t['accent']}; border-color: {t['accent']}; image: url("{tick}"); }}
+
+    QTabWidget::pane {{ border: none; background: transparent; top: 2px; }}
+    QTabBar {{ qproperty-drawBase: 0; }}
+    QTabBar::tab {{ background: transparent; color: {t['dim']}; padding: 4px 12px; margin-right: 4px; border-radius: 6px;
+        font-weight: 500; }}
+    QTabBar::tab:selected {{ background-color: {t['accent_soft']}; color: {t['selected_ink']}; font-weight: 600; }}
+    QTabBar::tab:hover:!selected {{ background-color: {t['hover']}; color: {t['text']}; }}
+
     QScrollArea {{ border: none; background: transparent; }}
     QAbstractScrollArea > QWidget#qt_scrollarea_viewport, QWidget#scrollInner {{ background: transparent; }}
     QScrollBar:vertical {{ background: transparent; width: 8px; margin: 2px; }}
-    QScrollBar::handle:vertical {{ background: {t['border']}; border-radius: 4px; min-height: 28px; }}
-    QScrollBar::handle:vertical:hover {{ background: {t['muted']}; }}
-    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
-    QHeaderView::section {{ background-color: {t['card']}; color: {t['muted']}; padding: 6px; border: none;
-        font-weight: 700; font-size: 10.5px; }}
-    QTextEdit, QTextBrowser {{ background-color: {t['text_area_bg']}; color: {t['text_area_fg']};
-        border: 1px solid {t['border']}; border-radius: 5px; }}
-    QTextEdit {{ font-family: "JetBrains Mono", "Noto Sans Mono", monospace; font-size: 12px; }}
-    QTextBrowser {{ font-family: "Inter", "Noto Sans", sans-serif; font-size: 12.5px; }}
-    QProgressBar {{ border: 1px solid {t['border']}; border-radius: 5px; background: {t['input']}; text-align: center;
-        color: {t['text']}; font-size: 11px; font-weight: 600; }}
-    QProgressBar::chunk {{ background: {t['accent']}; border-radius: 4px; }}
+    QScrollBar::handle:vertical {{ background: {t['control_border']}; border-radius: 3px; min-height: 28px; }}
+    QScrollBar::handle:vertical:hover {{ background: {t['dim']}; }}
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical, QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ height: 0; background: none; }}
+
+    QTextEdit, QTextBrowser {{ background-color: {t['field']}; color: {t['text']}; border: 1px solid {t['border']}; border-radius: 8px; }}
+    QTextEdit {{ font-family: "{MONO}"; font-size: 11.5px; }}
+    QTextBrowser {{ font-family: "{SANS}"; font-size: 12.5px; }}
+    QProgressBar {{ background-color: {t['control']}; border: 1px solid {t['border']}; border-radius: 4px; color: {t['text']};
+        text-align: center; font-size: 10.5px; font-weight: 600; }}
+    QProgressBar::chunk {{ background-color: {t['accent']}; border-radius: 3px; }}
+    QProgressBar#thin {{ max-height: 6px; min-height: 6px; border: none; border-radius: 3px; background-color: {t['header']}; }}
     """
 
 
@@ -287,27 +369,99 @@ class ElidedLabel(QLabel):
         super().resizeEvent(e)
 
 
-def card():
+def card(title=None, extra=None):
+    """A SolidCraft panel: rounded surface, optional uppercase title over a thin rule.
+    Returns (frame, body layout)."""
     f = QFrame()
     f.setObjectName("card")
-    return f
+    lay = QVBoxLayout(f)
+    lay.setContentsMargins(14, 12, 14, 14)
+    lay.setSpacing(8)
+    if title:
+        head = QHBoxLayout()
+        head.setContentsMargins(0, 0, 0, 0)
+        head.addWidget(section_title(title))
+        head.addStretch()
+        if extra is not None:
+            head.addWidget(extra)
+        lay.addLayout(head)
+        lay.addWidget(rule())
+    return f, lay
+
+
+def rule():
+    line = QFrame()
+    line.setObjectName("rule")
+    line.setFixedHeight(1)
+    return line
 
 
 def section_title(text):
-    lbl = QLabel(text)
+    lbl = QLabel(text.upper())
     lbl.setObjectName("sectionTitle")
     return lbl
 
 
-def button(text, role=None, slot=None, tip=None):
+def pill(text, kind="Muted"):
+    lbl = QLabel(text)
+    lbl.setObjectName(f"pill{kind}")
+    return lbl
+
+
+# Buttons whose icon colour follows the theme: (button, icon name, role)
+_ICON_BUTTONS = []
+
+
+def icon_color(role, dark):
+    t = theme(dark)
+    return {"primary": "#ffffff", "danger": t["error"]}.get(role, t["text"] if role != "appBarButton" else t["app_bar_text"])
+
+
+def retint_icons(dark):
+    alive = []
+    for b, name, role in _ICON_BUTTONS:
+        try:
+            b.setIcon(icon(name, icon_color(role, dark)))
+            alive.append((b, name, role))
+        except RuntimeError:  # the button was deleted with its row
+            pass
+    _ICON_BUTTONS[:] = alive
+
+
+def button(text, role=None, slot=None, tip=None, icon_name=None, dark=True, small=False):
+    """SolidCraft button roles: None (secondary), "primary", "danger", "ghost", "appBarButton"."""
     b = QPushButton(text)
     if role:
         b.setObjectName(role)
+    elif small:
+        b.setObjectName("small")
     if slot:
         b.clicked.connect(slot)
     if tip:
         b.setToolTip(tip)
+    if icon_name:
+        b.setIcon(icon(icon_name, icon_color(role, dark)))
+        b.setIconSize(QSize(14, 14))
+        _ICON_BUTTONS.append((b, icon_name, role))
+    b.setCursor(Qt.PointingHandCursor)
     return b
+
+
+def relative_time(ts):
+    d = time.time() - ts
+    if d < 60:
+        return "just now"
+    if d < 3600:
+        return f"{int(d // 60)} min ago"
+    if d < 86400:
+        return f"{int(d // 3600)} h ago"
+    if d < 86400 * 30:
+        return f"{int(d // 86400)} d ago"
+    return time.strftime("%Y-%m-%d", time.localtime(ts))
+
+
+def short_path(p):
+    return "~" + p[len(HOME):] if p.startswith(HOME) else p
 
 
 def clear_layout(layout):
@@ -363,7 +517,7 @@ class StatsDialog(QDialog):
                 self.lbl_total.setText("Total: 0h 00m (0 launches)")
 
         row.addWidget(button("Reset", "danger", reset))
-        row.addWidget(button("OK", "accent", self.accept))
+        row.addWidget(button("OK", "primary", self.accept))
         lay.addLayout(row)
 
 
@@ -379,11 +533,11 @@ class InfoDialog(QDialog):
         text = QLabel(
             f"<b>{APP_NAME} {APP_VERSION}</b><br><br>"
             "• Downloads, updates and launches SolidCraft <b>stable</b> and <b>nightly</b> AppImages from "
-            f'<a style="color:{t["link"]}" href="{REPO_URL}/releases">the official GitHub releases</a>.<br>'
+            f'<a style="color:{t["accent"]}" href="{REPO_URL}/releases">the official GitHub releases</a>.<br>'
             "• Builds GitHub pull requests (or <i>main</i>) with cargo and launches the result. A Rust toolchain "
             "is found automatically, or installed into the install folder on request (no root).<br>"
             "• Project library: preview pictures come from each version's own <tt>solidcraft-cli</tt>; "
-            f'3D view opens the file in <a style="color:{t["link"]}" href="https://f3d.app/">F3D</a> if it is installed '
+            f'3D view opens the file in <a style="color:{t["accent"]}" href="https://f3d.app/">F3D</a> if it is installed '
             "(SolidCraft designs are exported to STL first).<br>"
             "• Versions it launches don't add their own menu entries; use <i>Desktop entry</i> for that.<br>"
             "• Each SolidCraft it starts gets a private control port, so <i>Open in running instance</i> can "
@@ -391,7 +545,7 @@ class InfoDialog(QDialog):
             f"Install folder: <tt>{install_dir}</tt><br>"
             f"Build log: <tt>{BUILD_LOG_FILE}</tt><br><br>"
             "Unofficial; not affiliated with the SolidCraft project. Modelled on "
-            f'<a style="color:{t["link"]}" href="https://github.com/deltahedra3d/freecad-launcher">FreeCAD Smart '
+            f'<a style="color:{t["accent"]}" href="https://github.com/deltahedra3d/freecad-launcher">FreeCAD Smart '
             "Launcher</a> by Deltahedra (MIT)."
         )
         text.setWordWrap(True)
@@ -399,7 +553,7 @@ class InfoDialog(QDialog):
         text.setTextFormat(Qt.RichText)
         lay.addWidget(text)
         lay.addStretch()
-        lay.addWidget(button("OK", "accent", self.accept), 0, Qt.AlignCenter)
+        lay.addWidget(button("OK", "primary", self.accept), 0, Qt.AlignRight)
 
 
 class CopyableErrorDialog(QDialog):
@@ -416,7 +570,7 @@ class CopyableErrorDialog(QDialog):
         text.setPlainText(message)
         lay.addWidget(text, 1)
         row = QHBoxLayout()
-        row.addWidget(button("Copy to clipboard", "accent", lambda: QApplication.clipboard().setText(text.toPlainText())))
+        row.addWidget(button("Copy to clipboard", None, lambda: QApplication.clipboard().setText(text.toPlainText())))
         row.addStretch()
         row.addWidget(button("Close", None, self.accept))
         lay.addLayout(row)
@@ -449,7 +603,7 @@ class DownloadDialog(QDialog):
                 combo.addItem(display_name(rel["ver"]), rel["filename"])
             self.combos[kind] = combo
             r.addWidget(combo, 1)
-            b = button("Download", "accent", lambda _=False, k=kind: self.start(k))
+            b = button("Download", "primary", lambda _=False, k=kind: self.start(k), None, "import_tray", app.dark)
             self.buttons.append(b)
             r.addWidget(b)
             lay.addLayout(r)
@@ -510,7 +664,7 @@ class UpdateDialog(QDialog):
             body.setWordWrap(True)
             lay.addWidget(body)
         lines = QLabel("\n".join(f"• {u['kind'].capitalize()}: {display_name(u['ver'])}" for u in updates))
-        lines.setObjectName("muted" if welcome else "")
+        lines.setObjectName("muted" if welcome else "strong")
         lay.addWidget(lines)
         hint = QLabel("Choose what to download, or Close to dismiss this window.")
         hint.setObjectName("muted")
@@ -521,11 +675,11 @@ class UpdateDialog(QDialog):
         kinds = {u["kind"] for u in updates}
         verb = "Download" if welcome else "Update"
         if "stable" in kinds:
-            row.addWidget(button(f"{verb} stable", "accent", lambda: self.pick("stable")))
+            row.addWidget(button(f"{verb} stable", None if len(kinds) == 2 else "primary", lambda: self.pick("stable")))
         if "nightly" in kinds:
-            row.addWidget(button(f"{verb} nightly", "warning", lambda: self.pick("nightly")))
+            row.addWidget(button(f"{verb} nightly", None if len(kinds) == 2 else "primary", lambda: self.pick("nightly")))
         if len(kinds) == 2:
-            row.addWidget(button(f"{verb} both", "success", lambda: self.pick("both")))
+            row.addWidget(button(f"{verb} both", "primary", lambda: self.pick("both")))
         lay.addLayout(row)
 
     def pick(self, choice):
@@ -557,7 +711,7 @@ class PRConversationDialog(QDialog):
         row = QHBoxLayout()
         row.addWidget(button("Open on GitHub", None, lambda: webbrowser.open(f"{REPO_URL}/pull/{num}")))
         row.addStretch()
-        row.addWidget(button("Close", "accent", self.accept))
+        row.addWidget(button("Close", "primary", self.accept))
         lay.addLayout(row)
         self.sig_loaded.connect(self.apply)
         threading.Thread(target=self.load, daemon=True).start()
@@ -568,9 +722,9 @@ class PRConversationDialog(QDialog):
         try:
             pr = github_get(f"{API}/pulls/{num}")
             comments = github_get(f"{API}/issues/{num}/comments?per_page=100")
-            parts = [f"### Description — @{pr['user']['login']} · {pr['created_at'][:10]}\n\n{pr.get('body') or '*(no description)*'}"]
+            parts = [f"## Description — @{pr['user']['login']} · {pr['created_at'][:10]}\n\n{pr.get('body') or '*(no description)*'}"]
             for c in comments:
-                parts.append(f"### @{c['user']['login']} · {c['created_at'][:16].replace('T', ' ')}\n\n{c.get('body') or ''}")
+                parts.append(f"## @{c['user']['login']} · {c['created_at'][:16].replace('T', ' ')}\n\n{c.get('body') or ''}")
             md = "\n\n---\n\n".join(parts)
             # Raw <img> tags become Markdown images so the browser shows them.
             md = re.sub(r'<img[^>]*src="([^"]+)"[^>]*>', r"![](\1)", md)
@@ -587,7 +741,143 @@ class PRConversationDialog(QDialog):
 
     def apply(self, md, images):
         self.body.images = images
+        # Qt draws Markdown headings far larger than SolidCraft's type scale: step them down two levels.
+        md = re.sub(r"^(#{1,4})(?=\s)", lambda m: "#" * min(6, len(m.group(1)) + 2), md, flags=re.M)
         self.body.setMarkdown(md)
+
+
+class AddBuildDialog(QDialog):
+    """Add a SolidCraft program already on disk, or a fork on GitHub to build."""
+
+    def __init__(self, app):
+        super().__init__(app)
+        self.app = app
+        self.result_kind = None
+        self.result = None
+        self.setWindowTitle("Add build")
+        self.setMinimumWidth(560)
+        self.setStyleSheet(make_qss(app.dark))
+        d = app.dark
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(18, 16, 18, 16)
+        lay.setSpacing(10)
+        self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(True)
+        lay.addWidget(self.tabs)
+
+        local = QWidget()
+        ll = QVBoxLayout(local)
+        ll.setContentsMargins(0, 10, 0, 0)
+        ll.setSpacing(8)
+        hint = QLabel("A SolidCraft program or AppImage on this computer, such as a fork you build yourself.")
+        hint.setObjectName("muted")
+        hint.setWordWrap(True)
+        ll.addWidget(hint)
+        row = QHBoxLayout()
+        self.path_edit = QLineEdit()
+        self.path_edit.setPlaceholderText("/path/to/solidcraft or solidcraft-….AppImage")
+        row.addWidget(self.path_edit, 1)
+        row.addWidget(button("Browse…", None, self.browse, None, "folder", d))
+        ll.addLayout(row)
+        self.local_name = QLineEdit()
+        self.local_name.setPlaceholderText("Name in the list, e.g. My fork")
+        ll.addWidget(self.local_name)
+        ll.addStretch()
+        self.tabs.addTab(local, "Program on this computer")
+
+        fork = QWidget()
+        fl = QVBoxLayout(fork)
+        fl.setContentsMargins(0, 10, 0, 0)
+        fl.setSpacing(8)
+        hint = QLabel("A fork of SolidCraft on GitHub. Its branch is fetched into your source folder and built with "
+                      "cargo, like a pull request. Only build code you trust: building runs it.")
+        hint.setObjectName("muted")
+        hint.setWordWrap(True)
+        fl.addWidget(hint)
+        self.repo_edit = QLineEdit()
+        self.repo_edit.setPlaceholderText("owner/repo or GitHub URL, e.g. aavits/solidcraft")
+        fl.addWidget(self.repo_edit)
+        self.branch_edit = QComboBox()
+        self.branch_edit.setEditable(True)
+        self.branch_edit.lineEdit().setPlaceholderText("branch")
+        brow = QHBoxLayout()
+        brow.addWidget(self.branch_edit, 1)
+        brow.addWidget(button("List branches", None, self.list_branches, None, "refresh", d))
+        fl.addLayout(brow)
+        self.fork_name = QLineEdit()
+        self.fork_name.setPlaceholderText("Name in the list (default: owner/repo @ branch)")
+        fl.addWidget(self.fork_name)
+        self.fork_msg = QLabel("")
+        self.fork_msg.setObjectName("muted")
+        self.fork_msg.setWordWrap(True)
+        fl.addWidget(self.fork_msg)
+        fl.addStretch()
+        self.tabs.addTab(fork, "Fork on GitHub")
+
+        foot = QHBoxLayout()
+        foot.addStretch()
+        foot.addWidget(button("Cancel", None, self.reject))
+        self.btn_ok = button("Add", "primary", self.accept_input)
+        foot.addWidget(self.btn_ok)
+        lay.addLayout(foot)
+        self.tabs.currentChanged.connect(lambda i: self.btn_ok.setText("Add" if i == 0 else "Build…"))
+
+    def browse(self):
+        path, _ = QFileDialog.getOpenFileName(self, "SolidCraft program", HOME)
+        if path:
+            self.path_edit.setText(path)
+            if not self.local_name.text():
+                self.local_name.setText(os.path.basename(os.path.dirname(path)) if os.path.basename(path) == "solidcraft" else os.path.basename(path))
+
+    def repo(self):
+        text = self.repo_edit.text().strip().removesuffix(".git").removesuffix("/")
+        m = re.search(r"(?:github\.com[/:])?([\w.-]+/[\w.-]+)$", text)
+        return m.group(1) if m else ""
+
+    def list_branches(self):
+        repo = self.repo()
+        if not repo:
+            self.fork_msg.setText("Enter owner/repo first.")
+            return
+        try:
+            info = github_get(f"https://api.github.com/repos/{repo}")
+            branches = github_get(f"https://api.github.com/repos/{repo}/branches?per_page=100")
+        except Exception as e:  # unknown repo or no network
+            self.fork_msg.setText(f"Could not read {repo}: {e}")
+            return
+        current = self.branch_edit.currentText()
+        self.branch_edit.clear()
+        names = [b["name"] for b in branches]
+        default = info.get("default_branch", "")
+        names.sort(key=lambda n: (n != default, n))
+        self.branch_edit.addItems(names)
+        if current:
+            self.branch_edit.setCurrentText(current)
+        parent = (info.get("parent") or {}).get("full_name", "")
+        self.fork_msg.setText(f"{len(names)} branches." + ("" if parent == REPO or repo == REPO else
+                                                           f"  Note: {repo} is not a fork of {REPO}."))
+
+    def accept_input(self):
+        if self.tabs.currentIndex() == 0:
+            path = os.path.expanduser(self.path_edit.text().strip())
+            if not (os.path.isfile(path) and os.access(path, os.X_OK)):
+                QMessageBox.warning(self, "Add build", "Choose a SolidCraft program file that can be run.")
+                return
+            self.result_kind = "program"
+            self.result = (path, self.local_name.text().strip() or os.path.basename(path))
+        else:
+            repo, branch = self.repo(), self.branch_edit.currentText().strip()
+            if not repo or not branch:
+                QMessageBox.warning(self, "Add build", "Enter the fork (owner/repo) and a branch.")
+                return
+            try:
+                github_get(f"https://api.github.com/repos/{repo}/branches/{urllib.parse.quote(branch, safe='')}")
+            except Exception as e:  # unknown repo or branch
+                QMessageBox.warning(self, "Add build", f"github.com/{repo} has no branch \"{branch}\" ({e}).")
+                return
+            self.result_kind = "fork"
+            self.result = (repo, branch, self.fork_name.text().strip() or f"{repo} @ {branch}")
+        self.accept()
 
 
 class SourceBuildDialog(QDialog):
@@ -716,6 +1006,10 @@ class Launcher(QMainWindow):
         self.config = {}
         self.install_dir = DEFAULT_INSTALL_DIR
         self.load_config()
+        if "extra_versions" not in self.config:
+            fork = os.path.join(HOME, "Applications", "solidcraft-fork", "bin", "solidcraft")
+            self.config["extra_versions"] = [{"display": "Fork (~/Applications/solidcraft-fork)", "path": fork}] if os.path.exists(fork) else []
+            self.save_config()
         self.stats = self.load_stats()
         self.dark = self.config.get("dark_mode", True)
         self.remote = {"stable": [], "nightly": []}
@@ -825,95 +1119,111 @@ class Launcher(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         outer = QVBoxLayout(central)
-        outer.setContentsMargins(16, 12, 16, 8)
-        outer.setSpacing(8)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        d = self.dark
 
-        header = QHBoxLayout()
-        icon = self.icon_path()
-        if icon:
-            lbl_icon = QLabel()
-            lbl_icon.setPixmap(QPixmap(icon).scaled(32, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-            header.addWidget(lbl_icon)
+        # Application bar, as SolidCraft's title bar: brand mark, name, actions on the right.
+        bar = QWidget()
+        bar.setObjectName("appBar")
+        bar.setAttribute(Qt.WA_StyledBackground, True)
+        bar.setFixedHeight(40)
+        bl = QHBoxLayout(bar)
+        bl.setContentsMargins(14, 0, 12, 0)
+        bl.setSpacing(10)
+        icon_file = self.icon_path()
+        if icon_file:
+            mark = QLabel()
+            mark.setPixmap(QPixmap(icon_file).scaled(20, 20, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            bl.addWidget(mark)
         title = QLabel("SolidCraft Launcher")
-        title.setStyleSheet("font-size: 22px; font-weight: 700; letter-spacing: 0.2px;")
-        header.addWidget(title)
-        header.addStretch()
-        outer.addLayout(header)
+        title.setObjectName("appTitle")
+        bl.addWidget(title)
+        bl.addStretch()
+        bl.addWidget(button("Statistics", "appBarButton", self.show_stats, "Time and launches per version", "chart", d))
+        bl.addWidget(button("Infos", "appBarButton", lambda: InfoDialog(self, self.dark, self.install_dir).exec(), None, "help", d))
+        ver = QLabel(f"v{APP_VERSION}")
+        ver.setObjectName("appVersion")
+        bl.addWidget(ver)
+        outer.addWidget(bar)
 
+        body = QWidget()
+        outer.addWidget(body, 1)
+        bod = QVBoxLayout(body)
+        bod.setContentsMargins(16, 14, 16, 10)
+        bod.setSpacing(10)
         content = QHBoxLayout()
         content.setSpacing(12)
-        outer.addLayout(content, 1)
+        bod.addLayout(content, 1)
 
         # Left column: versions, community, options
         left_inner = QWidget()
         left_inner.setObjectName("scrollInner")
         left = QVBoxLayout(left_inner)
         left.setContentsMargins(0, 0, 4, 0)
-        left.setSpacing(10)
+        left.setSpacing(12)
         left.setAlignment(Qt.AlignTop)
 
-        b1 = card()
-        l1 = QVBoxLayout(b1)
-        l1.setContentsMargins(14, 12, 14, 12)
-        l1.setSpacing(8)
+        b1, l1 = card("SolidCraft versions")
         self.version_combos = {}
         self.version_status = {}
-        for kind, title_text in (("stable", "STABLE"), ("nightly", "NIGHTLY"), ("other", "OTHER BUILDS")):
-            hdr = QHBoxLayout()
-            hdr.addWidget(section_title(title_text))
-            hdr.addStretch()
-            st = QLabel("Checking…" if kind != "other" else "")
-            st.setObjectName("muted")
-            hdr.addWidget(st)
-            combo = QComboBox()
-            combo.setFixedHeight(32)
-            combo.activated.connect(lambda _i, k=kind: self.select_kind(k))
-            self.version_combos[kind] = combo
-            self.version_status[kind] = st
+        for kind, label in (("stable", "Stable"), ("nightly", "Nightly"), ("other", "Other builds")):
             wrap = QWidget()
             wl = QVBoxLayout(wrap)
-            wl.setContentsMargins(0, 4 if kind != "stable" else 0, 0, 0)
+            wl.setContentsMargins(0, 2, 0, 2)
             wl.setSpacing(6)
+            hdr = QHBoxLayout()
+            name = QLabel(label)
+            name.setObjectName("strong")
+            hdr.addWidget(name)
+            hdr.addStretch()
+            st = pill("Checking…" if kind != "other" else "")
+            st.setVisible(kind != "other")
+            hdr.addWidget(st)
+            if kind == "other":
+                self.btn_rebuild = button("Rebuild", "ghost", self.rebuild_selected, "Fetch the latest commits and build again", "refresh", d)
+                self.btn_rebuild.setVisible(False)
+                hdr.addWidget(self.btn_rebuild)
+                hdr.addWidget(button("Add build…", "ghost", self.add_build, "Add a program on this computer, or build a fork from GitHub", "plus", d))
             wl.addLayout(hdr)
+            combo = QComboBox()
+            combo.activated.connect(lambda _i, k=kind: self.select_kind(k))
             wl.addWidget(combo)
+            self.version_combos[kind] = combo
+            self.version_status[kind] = st
             l1.addWidget(wrap)
             if kind == "other":
                 self.other_wrap = wrap
                 combo.setToolTip("Your installed SolidCraft, your own builds, and pull requests you built")
+        l1.addSpacing(4)
         row = QHBoxLayout()
         row.setSpacing(6)
-        row.addWidget(button("Download", "accent", self.open_download_dialog))
-        row.addWidget(button("Desktop entry", "accent", self.create_desktop_entry, "Add the selected version to the application menu"))
+        row.addWidget(button("Download", None, self.open_download_dialog, None, "import_tray", d))
+        row.addWidget(button("Desktop entry", None, self.create_desktop_entry, "Add the selected version to the application menu", "plus", d))
         row.addStretch()
-        self.btn_delete = button("Delete", "danger", self.delete_local)
+        self.btn_delete = button("Delete", "danger", self.delete_local, None, "trash", d)
         row.addWidget(self.btn_delete)
-        row.addWidget(button("Launch", "success", self.launch_selected))
+        row.addWidget(button("Launch", "primary", self.launch_selected, None, "play", d))
         l1.addLayout(row)
         left.addWidget(b1)
 
-        b3 = card()
-        l3 = QVBoxLayout(b3)
-        l3.setContentsMargins(14, 12, 14, 12)
-        l3.setSpacing(8)
-        l3.addWidget(section_title("SOLIDCRAFT COMMUNITY"))
+        b3, l3 = card("SolidCraft community")
         links = QHBoxLayout()
-        for text, url in (("🌐 Website", "https://solidcraft.io"), ("📖 Docs", "https://docs.solidcraft.io"),
-                          ("💬 Discord", "https://discord.gg/FtU4NQNVDH"), ("💻 GitHub", REPO_URL)):
-            links.addWidget(button(text, None, lambda _=False, u=url: webbrowser.open(u)))
+        links.setSpacing(6)
+        for text, url in (("Website", "https://solidcraft.io"), ("Docs", "https://docs.solidcraft.io"),
+                          ("Discord", "https://discord.gg/FtU4NQNVDH"), ("GitHub", REPO_URL)):
+            links.addWidget(button(text, None, lambda _=False, u=url: webbrowser.open(u), url))
         l3.addLayout(links)
         self.milestone_box = QVBoxLayout()
-        self.milestone_box.setSpacing(4)
+        self.milestone_box.setSpacing(5)
         ph = QLabel("Milestones: loading…")
         ph.setObjectName("muted")
         self.milestone_box.addWidget(ph)
         l3.addLayout(self.milestone_box)
         left.addWidget(b3)
 
-        b4 = card()
-        l4 = QVBoxLayout(b4)
-        l4.setContentsMargins(14, 12, 14, 12)
-        l4.setSpacing(4)
-        l4.addWidget(section_title("LAUNCHER OPTIONS"))
+        b4, l4 = card("Launcher options")
+        l4.setSpacing(6)
         self.chk_autoclose = QCheckBox("Close launcher on launch")
         self.chk_autoclose.setChecked(self.config.get("autoclose", False))
         self.chk_autoclose.toggled.connect(lambda v: self.set_option("autoclose", v))
@@ -935,64 +1245,61 @@ class Launcher(QMainWindow):
         left_scroll.setFrameShape(QFrame.NoFrame)
         left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         left_scroll.setWidget(left_inner)
-        left_scroll.setMinimumWidth(420)
-        left_scroll.setMaximumWidth(540)
+        left_scroll.setMinimumWidth(470)
+        left_scroll.setMaximumWidth(520)
         content.addWidget(left_scroll, 0)
 
         # Centre: pull requests
-        pr_panel = card()
-        pl = QVBoxLayout(pr_panel)
-        pl.setContentsMargins(12, 12, 12, 12)
-        pl.setSpacing(8)
-        hdr = QHBoxLayout()
-        hdr.addWidget(section_title("PULL REQUESTS"))
-        hdr.addStretch()
-        btn_refresh = button("↻", None, lambda: threading.Thread(target=self.fetch_recent_prs, daemon=True).start(), "Refresh pull requests")
-        btn_refresh.setFixedSize(32, 28)
-        hdr.addWidget(btn_refresh)
-        pl.addLayout(hdr)
+        refresh = button("", "ghost", lambda: threading.Thread(target=self.fetch_recent_prs, daemon=True).start(),
+                         "Refresh pull requests", "refresh", d)
+        refresh.setFixedSize(28, 24)
+        pr_panel, pl = card("Pull requests", refresh)
         self.pr_tabs = QTabWidget()
+        self.pr_tabs.setDocumentMode(True)
         self.pr_recent_layout = self._scroll_tab("Recent")
         search_page = QWidget()
         sl = QVBoxLayout(search_page)
-        sl.setContentsMargins(4, 4, 4, 4)
-        bar = QHBoxLayout()
+        sl.setContentsMargins(0, 6, 0, 0)
+        bar2 = QHBoxLayout()
         self.pr_search_edit = QLineEdit()
-        self.pr_search_edit.setPlaceholderText("PR title, author, or PR number…")
+        self.pr_search_edit.setPlaceholderText("PR title, @author, or PR number…")
         self.pr_search_edit.returnPressed.connect(self.search_prs)
-        bar.addWidget(self.pr_search_edit, 1)
-        bar.addWidget(button("Search", "accent", self.search_prs))
-        sl.addLayout(bar)
+        bar2.addWidget(self.pr_search_edit, 1)
+        bar2.addWidget(button("Search", None, self.search_prs))
+        sl.addLayout(bar2)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         inner = QWidget()
         inner.setObjectName("scrollInner")
         self.pr_search_layout = QVBoxLayout(inner)
         self.pr_search_layout.setAlignment(Qt.AlignTop)
+        self.pr_search_layout.setContentsMargins(0, 0, 4, 0)
+        self.pr_search_layout.setSpacing(0)
         scroll.setWidget(inner)
         sl.addWidget(scroll, 1)
         self.pr_tabs.addTab(search_page, "Search")
         self.pr_fav_layout = self._scroll_tab("Favorites")
         pl.addWidget(self.pr_tabs, 1)
-        pl.addWidget(button("VIEW MORE ON GITHUB", "accent", lambda: webbrowser.open(f"{REPO_URL}/pulls")))
+        more = QHBoxLayout()
+        more.addStretch()
+        more.addWidget(button("View more on GitHub", None, lambda: webbrowser.open(f"{REPO_URL}/pulls"), None, "external", d))
+        pl.addLayout(more)
 
-        b2 = card()
+        b2, l2 = card("Test a GitHub pull request")
         b2.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
-        l2 = QVBoxLayout(b2)
-        l2.setContentsMargins(14, 12, 14, 12)
-        l2.setSpacing(8)
-        l2.addWidget(section_title("TEST A GITHUB PULL REQUEST"))
         self.pr_stack = QStackedWidget()
         onboard = QWidget()
         ol = QVBoxLayout(onboard)
-        ol.setContentsMargins(0, 4, 0, 0)
-        msg = QLabel("Want to try a PR?\nYou need a SolidCraft source folder (a git clone) first.")
+        ol.setContentsMargins(0, 0, 0, 0)
+        ol.setSpacing(8)
+        msg = QLabel("Want to try a PR? You need a SolidCraft source folder (a git clone) first.")
         msg.setObjectName("muted")
         msg.setWordWrap(True)
         ol.addWidget(msg)
         ob = QHBoxLayout()
-        ob.addWidget(button("Use an existing clone", "accent", self.pick_source, "Select a folder with a clone of tangency-labs/solidcraft"))
-        ob.addWidget(button("Clone && build SolidCraft…", "warning", self.build_from_source, "Clone SolidCraft and build it with cargo"))
+        ob.addWidget(button("Use an existing clone", None, self.pick_source, "Select a folder with a clone of tangency-labs/solidcraft", "folder", d))
+        ob.addWidget(button("Clone && build SolidCraft…", "primary", self.build_from_source, "Clone SolidCraft and build it with cargo", "build", d))
+        ob.addStretch()
         ol.addLayout(ob)
         self.pr_stack.addWidget(onboard)
 
@@ -1001,14 +1308,18 @@ class Launcher(QMainWindow):
         rl.setContentsMargins(0, 0, 0, 0)
         rl.setSpacing(8)
         src = QHBoxLayout()
-        src.addWidget(QLabel("Source:"))
+        lab = QLabel("Source")
+        lab.setFixedWidth(54)
+        src.addWidget(lab)
         self.src_edit = QLineEdit(self.config.get("src_folder", ""))
         self.src_edit.editingFinished.connect(self._src_edited)
         src.addWidget(self.src_edit, 1)
-        src.addWidget(button("Browse...", None, self.pick_source))
+        src.addWidget(button("Browse…", None, self.pick_source, None, "folder", d))
         rl.addLayout(src)
         prow = QHBoxLayout()
-        prow.addWidget(QLabel("PR #:"))
+        lab = QLabel("PR #")
+        lab.setFixedWidth(54)
+        prow.addWidget(lab)
         self.combo_pr = QComboBox()
         self.combo_pr.setEditable(True)
         self.combo_pr.addItems([str(x) for x in self.config.get("pr_history", [])])
@@ -1016,98 +1327,101 @@ class Launcher(QMainWindow):
         self.combo_pr.setFixedWidth(110)
         self.combo_pr.currentTextChanged.connect(self.on_pr_changed)
         prow.addWidget(self.combo_pr)
-        prow.addWidget(button("GitHub", None, self.open_pr_on_github))
-        prow.addWidget(button("Conversation", None, self.open_pr_conversation))
+        prow.addWidget(button("GitHub", None, self.open_pr_on_github, None, "external", d))
+        prow.addWidget(button("Conversation", None, self.open_pr_conversation, None, "comment", d))
         prow.addStretch()
         rl.addLayout(prow)
         brow = QHBoxLayout()
-        self.btn_build = button("Build", "warning", self.build_pr)
-        self.btn_stop = button("Stop", "danger", self.stop_build)
+        self.btn_build = button("Build", "primary", self.build_pr, None, "build", d)
+        self.btn_stop = button("Stop", "danger", self.stop_build, None, "stop", d)
         self.btn_stop.setEnabled(False)
         brow.addWidget(self.btn_build, 1)
         brow.addWidget(self.btn_stop, 1)
-        brow.addWidget(button("Launch", "success", self.launch_pr), 1)
+        brow.addWidget(button("Launch", None, self.launch_pr, None, "play", d), 1)
         rl.addLayout(brow)
         self.pr_progress = QProgressBar()
+        self.pr_progress.setObjectName("thin")
         self.pr_progress.setRange(0, 100)
-        self.pr_progress.setFixedHeight(14)
         self.pr_progress.setTextVisible(False)
         self.pr_progress.hide()
         rl.addWidget(self.pr_progress)
-        xrow = QHBoxLayout()
-        xrow.addWidget(button("Build SolidCraft main…", "warning", self.build_from_source, "Update the source folder to main and build it"))
-        xrow.addWidget(button("Free build space", None, self.free_build_space, "Delete the source folder's cargo build files (target/)"))
-        xrow.addStretch()
-        rl.addLayout(xrow)
         self.lbl_pr_info = ElidedLabel("Title: -\nAuthor: -")
         self.lbl_pr_info.setObjectName("muted")
         rl.addWidget(self.lbl_pr_info)
         self.lbl_pr_status = ElidedLabel("Ready.")
         self.lbl_pr_status.setObjectName("muted")
         rl.addWidget(self.lbl_pr_status)
+        xrow = QHBoxLayout()
+        xrow.addWidget(button("Build SolidCraft main…", None, self.build_from_source, "Update the source folder to main and build it", "build", d))
+        xrow.addWidget(button("Free build space", None, self.free_build_space, "Delete the source folder's cargo build files (target/)", "trash", d))
+        xrow.addStretch()
+        rl.addLayout(xrow)
         self.pr_stack.addWidget(ready)
         l2.addWidget(self.pr_stack)
         pl.addWidget(b2)
+        pl.setStretch(2, 1)
         content.addWidget(pr_panel, 1)
 
         # Right: project library
-        right = card()
-        rr = QVBoxLayout(right)
-        rr.setContentsMargins(12, 12, 12, 12)
-        rr.setSpacing(8)
-        rr.addWidget(section_title("PROJECT LIBRARY"))
+        right, rr = card("Project library")
+        thumb_frame = QFrame()
+        thumb_frame.setObjectName("field")
+        thumb_frame.setFixedHeight(176)
+        tl = QVBoxLayout(thumb_frame)
+        tl.setContentsMargins(4, 4, 4, 4)
         self.thumb = QLabel("No project selected")
+        self.thumb.setObjectName("muted")
         self.thumb.setAlignment(Qt.AlignCenter)
-        self.thumb.setFixedHeight(170)
-        self.thumb.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.thumb.setStyleSheet(f"background: {theme(self.dark)['input']}; border-radius: 6px;")
-        rr.addWidget(self.thumb)
+        self.thumb.setWordWrap(True)
+        tl.addWidget(self.thumb)
+        rr.addWidget(thumb_frame)
         vrow = QHBoxLayout()
-        vrow.addStretch()
-        self.btn_3d = button("3D view", "accent", self.open_3d_view, "Open the selected file in F3D (designs are exported to STL first)")
+        self.lbl_file = ElidedLabel("No project selected")
+        self.lbl_file.setObjectName("muted")
+        vrow.addWidget(self.lbl_file, 1)
+        self.btn_3d = button("3D view", None, self.open_3d_view, "Open the selected file in F3D (designs are exported to STL first)", "eye", d)
         self.btn_3d.setEnabled(False)
         vrow.addWidget(self.btn_3d)
         rr.addLayout(vrow)
-        self.lbl_file = ElidedLabel("No project selected")
-        self.lbl_file.setObjectName("muted")
-        rr.addWidget(self.lbl_file)
         self.project_list = QListWidget()
+        self.project_list.setSpacing(1)
         self.project_list.itemSelectionChanged.connect(self.on_project_select)
         self.project_list.itemDoubleClicked.connect(lambda _i: self.open_3d_view())
         rr.addWidget(self.project_list, 1)
         srow = QHBoxLayout()
-        srow.addWidget(button("Scan Folder...", None, self.change_scan_folder))
-        srow.addWidget(button("Refresh", None, self.refresh_projects))
+        srow.addWidget(button("Scan folder…", None, self.change_scan_folder, None, "folder", d))
+        srow.addWidget(button("Refresh", None, self.refresh_projects, None, "refresh", d))
+        srow.addStretch()
         rr.addLayout(srow)
-        rr.addWidget(button("LAUNCH PROJECT", "success", self.launch_project))
-        rr.addWidget(button("OPEN IN RUNNING INSTANCE", "accent", self.open_in_running))
-        rr.addWidget(button("LAUNCH PROJECT WITH PR", "warning", self.launch_project_with_pr))
+        rr.addWidget(rule())
+        rr.addWidget(button("Launch project", "primary", self.launch_project, "Open the selected file with the selected version", "play", d))
+        rr.addWidget(button("Open in running instance", None, self.open_in_running, "Send the file to the last SolidCraft started from here", "external", d))
+        rr.addWidget(button("Launch project with PR", None, self.launch_project_with_pr, "Open the selected file with the PR build", "build", d))
         content.addWidget(right, 1)
 
-        # Footer
-        self.lbl_status = ElidedLabel("Checking GitHub for releases…")
-        self.lbl_status.setObjectName("muted")
-        outer.addWidget(self.lbl_status)
+        # Status line and footer
         foot = QHBoxLayout()
+        foot.setSpacing(12)
+        self.lbl_status = ElidedLabel("Checking GitHub for releases…")
+        self.lbl_status.setObjectName("footer")
+        foot.addWidget(self.lbl_status, 1)
         self.lbl_footer = QLabel("")
         self.lbl_footer.setObjectName("footer")
         foot.addWidget(self.lbl_footer)
-        foot.addStretch()
-        credit = QLabel(f'<a href="https://github.com/deltahedra3d/freecad-launcher" style="color:{theme(self.dark)["muted"]};">'
-                        "based on FreeCAD Smart Launcher by Deltahedra</a>")
+        credit = QLabel(f'<a href="https://github.com/deltahedra3d/freecad-launcher" style="color:{theme(d)["dim"]}; text-decoration:none;">'
+                        "Based on FreeCAD Smart Launcher by Deltahedra</a>")
+        credit.setObjectName("footer")
         credit.setOpenExternalLinks(True)
-        credit.setStyleSheet("font-size: 10.5px;")
+        self.credit = credit
         foot.addWidget(credit)
-        foot.addWidget(button("Infos", None, lambda: InfoDialog(self, self.dark, self.install_dir).exec()))
-        foot.addWidget(button("Statistics", None, self.show_stats))
-        foot.addWidget(button("Close", None, self.close))
-        outer.addLayout(foot)
+        bod.addLayout(foot)
 
         for layout, text in ((self.pr_recent_layout, "Loading recent PRs…"),
-                             (self.pr_search_layout, "Type a keyword or PR number\nand press Enter or Search.")):
+                             (self.pr_search_layout, "Type a keyword or PR number and press Enter.")):
             ph = QLabel(text)
             ph.setObjectName("muted")
             ph.setAlignment(Qt.AlignCenter)
+            ph.setWordWrap(True)
             layout.addWidget(ph)
         self.render_favorites()
 
@@ -1118,9 +1432,12 @@ class Launcher(QMainWindow):
         inner.setObjectName("scrollInner")
         layout = QVBoxLayout(inner)
         layout.setAlignment(Qt.AlignTop)
+        layout.setContentsMargins(0, 4, 4, 0)
+        layout.setSpacing(0)
         scroll.setWidget(inner)
         self.pr_tabs.addTab(scroll, name)
         return layout
+
 
     def connect_signals(self):
         s = self.sig
@@ -1150,9 +1467,11 @@ class Launcher(QMainWindow):
         self.dark = value
         self.set_option("dark_mode", value)
         self.setStyleSheet(make_qss(value))
-        self.thumb.setStyleSheet(f"background: {theme(value)['input']}; border-radius: 6px;")
+        retint_icons(value)
+        self.credit.setText(self.credit.text().replace(theme(not value)["dim"], theme(value)["dim"]))
         self.render_favorites()
         self.render_milestones(getattr(self, "_milestones", []))
+        self.refresh_projects()
         threading.Thread(target=self.fetch_recent_prs, daemon=True).start()
 
     # ----- versions -----
@@ -1185,11 +1504,11 @@ class Launcher(QMainWindow):
         for b in self.config.get("builds", []):
             if os.path.exists(b.get("path", "")):
                 others.append({"name": b["id"], "path": b["path"], "ver": b["id"], "kind": "other",
-                               "display": b.get("display", b["id"]), "managed": True, "build": True})
-        for extra in self.config.get("extra_versions", [{"display": "Fork (~/solidcraft-fork)", "path": os.path.join(HOME, "solidcraft-fork", "bin", "solidcraft")}]):
+                               "display": b.get("display", b["id"]), "managed": True, "build": True, "meta": b})
+        for extra in self.config.get("extra_versions", []):
             if os.path.exists(extra["path"]):
                 others.append({"name": extra["display"], "path": extra["path"], "ver": extra["display"], "kind": "other",
-                               "display": extra["display"], "managed": False})
+                               "display": extra["display"], "managed": False, "extra": True})
         self.local = found + others
         for kind in ("stable", "nightly", "other"):
             combo = self.version_combos[kind]
@@ -1205,7 +1524,7 @@ class Launcher(QMainWindow):
             idx = combo.findData(last) if last else -1
             combo.setCurrentIndex(max(0, idx))
             combo.blockSignals(False)
-        self.other_wrap.setVisible(any(v["kind"] == "other" for v in self.local))
+        self.other_wrap.setVisible(True)
         if not any(v["kind"] == self.selected_kind for v in self.local):
             self.selected_kind = next((k for k in ("stable", "nightly", "other") if any(v["kind"] == k for v in self.local)), "stable")
         self.update_version_status()
@@ -1225,7 +1544,10 @@ class Launcher(QMainWindow):
         for kind, combo in self.version_combos.items():
             combo.setStyleSheet(f"QComboBox {{ border: 2px solid {t['accent']}; }}" if kind == self.selected_kind else "")
         sel = self.selected_version()
-        self.btn_delete.setEnabled(bool(sel and sel["managed"]))
+        self.btn_delete.setEnabled(bool(sel and (sel["managed"] or sel.get("extra"))))
+        self.btn_delete.setText("Remove" if sel and sel.get("extra") else "Delete")
+        meta = (sel or {}).get("meta") or {}
+        self.btn_rebuild.setVisible(self.selected_kind == "other" and bool(meta.get("fork") or meta.get("id") == "main"))
 
     def selected_version(self):
         path = self.version_combos[self.selected_kind].currentData()
@@ -1237,14 +1559,15 @@ class Launcher(QMainWindow):
             latest = self.remote[kind][0] if self.remote[kind] else None
             have = [v for v in self.local if v["kind"] == kind]
             if latest is None:
-                lbl.setText("Not installed" if not have else f"{len(have)} installed")
-                lbl.setObjectName("muted")
+                text, kind_name = ("Not installed" if not have else f"{len(have)} installed"), "Muted"
             elif any(v["name"] == latest["filename"] for v in have):
-                lbl.setText("Up to date")
-                lbl.setObjectName("statusOk")
+                text, kind_name = "Up to date", "Ok"
+            elif have:
+                text, kind_name = f"New: {display_name(latest['ver']).replace(' (' + latest['ver'].split('-')[0] + ')', '')}", "Warn"
             else:
-                lbl.setText(f"New: {display_name(latest['ver'])}" if have else "Not installed")
-                lbl.setObjectName("statusWarn" if have else "muted")
+                text, kind_name = "Not installed", "Muted"
+            lbl.setText(text)
+            lbl.setObjectName(f"pill{kind_name}")
             lbl.style().unpolish(lbl)
             lbl.style().polish(lbl)
 
@@ -1390,6 +1713,12 @@ class Launcher(QMainWindow):
 
     def delete_local(self):
         v = self.selected_version()
+        if v and v.get("extra"):
+            if QMessageBox.question(self, "Remove", f"Remove {v['display']} from the list?\n\nThe program itself stays:\n{v['path']}") == QMessageBox.Yes:
+                self.config["extra_versions"] = [e for e in self.config.get("extra_versions", []) if e.get("path") != v["path"]]
+                self.save_config()
+                self.refresh_local_versions()
+            return
         if not v or not v["managed"]:
             return
         if QMessageBox.question(self, "Delete", f"Delete {v['display']}?\n\n{v['path']}") != QMessageBox.Yes:
@@ -1424,20 +1753,27 @@ class Launcher(QMainWindow):
             lbl.setObjectName("muted")
             self.milestone_box.addWidget(lbl)
             return
+        t = theme(self.dark)
         ms.sort(key=lambda m: (m.get("due_on") or "9999", -m.get("open_issues", 0)))
         for m in ms[:3]:
             closed, opened = m.get("closed_issues", 0), m.get("open_issues", 0)
             pct = int(closed * 100 / max(1, closed + opened))
-            lbl = QLabel(f'<a href="{m["html_url"]}" style="color:{theme(self.dark)["text"]}; text-decoration:none;">{m["title"]}</a>'
-                         f'  <span style="color:{theme(self.dark)["muted"]};">{closed}/{closed + opened} done</span>')
-            lbl.setOpenExternalLinks(True)
-            self.milestone_box.addWidget(lbl)
+            row = QHBoxLayout()
+            name = QLabel(f'<a href="{m["html_url"]}" style="color:{t["text"]}; text-decoration:none;">{m["title"]}</a>')
+            name.setOpenExternalLinks(True)
+            row.addWidget(name)
+            row.addStretch()
+            count = QLabel(f"{closed}/{closed + opened} · {pct}%")
+            count.setObjectName("muted")
+            row.addWidget(count)
+            self.milestone_box.addLayout(row)
             bar = QProgressBar()
+            bar.setObjectName("thin")
             bar.setRange(0, 100)
             bar.setValue(pct)
-            bar.setFixedHeight(14)
-            bar.setFormat("%p%")
+            bar.setTextVisible(False)
             self.milestone_box.addWidget(bar)
+            self.milestone_box.addSpacing(3)
 
     # ----- launching -----
 
@@ -1618,17 +1954,35 @@ class Launcher(QMainWindow):
         self.project_list.clear()
         self.projects = {}
         names = {}
-        for p, _m in sorted(found.items(), key=lambda kv: -kv[1]):
+        for p, mtime in sorted(found.items(), key=lambda kv: -kv[1]):
             label = os.path.basename(p)
             names[label] = names.get(label, 0) + 1
             if names[label] > 1:
                 label = f"{label}  ({os.path.basename(os.path.dirname(p))})"
-            item = QListWidgetItem(label)
+            # A row like SolidCraft's Recent list: name, the folder in mono, and how long ago.
+            item = QListWidgetItem()
             item.setToolTip(p)
             item.setData(Qt.UserRole, p)
+            row = QWidget()
+            rl = QVBoxLayout(row)
+            rl.setContentsMargins(8, 5, 8, 5)
+            rl.setSpacing(1)
+            top = QHBoxLayout()
+            name = QLabel(os.path.splitext(label)[0] if p.endswith(".solidcraft") else label)
+            name.setObjectName("strong")
+            top.addWidget(name, 1)
+            when = QLabel(relative_time(mtime))
+            when.setObjectName("muted")
+            top.addWidget(when)
+            rl.addLayout(top)
+            folder = ElidedLabel(short_path(os.path.dirname(p)) + "/")
+            folder.setObjectName("mono")
+            rl.addWidget(folder)
+            item.setSizeHint(QSize(10, 44))
             self.project_list.addItem(item)
+            self.project_list.setItemWidget(item, row)
             self.projects[label] = p
-        self.lbl_file.setText(f"{len(self.projects)} files in {root} and SolidCraft's recent files")
+        self.lbl_file.setText(f"{len(self.projects)} files in {short_path(root)} and SolidCraft's recent files")
 
     def selected_project(self):
         items = self.project_list.selectedItems()
@@ -1641,7 +1995,7 @@ class Launcher(QMainWindow):
         ext = os.path.splitext(p)[1].lower()
         try:
             st = os.stat(p)
-            self.lbl_file.setText(f"{p}\n{human_size(st.st_size)} · modified {time.strftime('%Y-%m-%d %H:%M', time.localtime(st.st_mtime))}")
+            self.lbl_file.setText(f"{human_size(st.st_size)} · modified {time.strftime('%Y-%m-%d %H:%M', time.localtime(st.st_mtime))}")
         except OSError:
             self.lbl_file.setText(p)
         self.btn_3d.setEnabled(ext in PROJECT_EXTENSIONS)
@@ -1826,14 +2180,14 @@ class Launcher(QMainWindow):
         threading.Thread(target=run, daemon=True).start()
 
     def pr_status(self, pr):
-        t = theme(self.dark)
+        """(state text, pill kind)"""
         if pr.get("merged_at"):
-            return "merged", "#A78BFA"
+            return "Merged", "Merged"
         if pr.get("state") == "closed":
-            return "closed", t["danger"]
+            return "Closed", "Error"
         if pr.get("draft"):
-            return "draft", t["muted"]
-        return "open", t["success"]
+            return "Draft", "Muted"
+        return "Open", "Ok"
 
     def render_error(self, layout, err):
         clear_layout(layout)
@@ -1855,62 +2209,44 @@ class Launcher(QMainWindow):
         self.render_prs(self.pr_fav_layout, self.pr_favorites, "No favorites yet. Star a PR with ☆.")
 
     def pr_row(self, pr):
-        t = theme(self.dark)
+        """One pull request, laid out like a SolidCraft list row."""
+        d = self.dark
         w = QWidget()
         lay = QVBoxLayout(w)
-        lay.setContentsMargins(6, 6, 6, 4)
-        lay.setSpacing(3)
-        top = QHBoxLayout()
+        lay.setContentsMargins(2, 8, 2, 0)
+        lay.setSpacing(4)
         num = pr.get("number")
+        top = QHBoxLayout()
+        top.setSpacing(8)
         lbl = QLabel(f"#{num}")
-        lbl.setStyleSheet(f"color: {t['accent']}; font-weight: 700;")
+        lbl.setObjectName("prNumber")
         top.addWidget(lbl)
-        date = QLabel((pr.get("created_at") or "")[:10])
-        date.setStyleSheet("font-size: 11px; font-weight: 600;")
-        top.addWidget(date)
-        top.addStretch()
-        st, color = self.pr_status(pr)
-        sl = QLabel(st)
-        sl.setStyleSheet(f"color: {color}; font-size: 11px; font-weight: 600;")
-        top.addWidget(sl)
-        lay.addLayout(top)
         title = QLabel(pr.get("title", ""))
+        title.setObjectName("strong")
         title.setWordWrap(True)
-        lay.addWidget(title)
+        top.addWidget(title, 1)
+        st, kind = self.pr_status(pr)
+        top.addWidget(pill(st, kind), 0, Qt.AlignTop)
+        lay.addLayout(top)
         bottom = QHBoxLayout()
-        author = QLabel(f"@{(pr.get('user') or {}).get('login', '?')}")
-        author.setStyleSheet(f"color: {t['muted']}; font-size: 11px;")
-        bottom.addWidget(author)
+        bottom.setSpacing(4)
+        meta = QLabel(f"@{(pr.get('user') or {}).get('login', '?')} · {(pr.get('created_at') or '')[:10]}")
+        meta.setObjectName("muted")
+        bottom.addWidget(meta)
         bottom.addStretch()
         fav = any(f.get("number") == num for f in self.pr_favorites)
-        icon_css = (f"QPushButton {{ background: {t['neutral']}; border: 1px solid {t['border']}; border-radius: 4px; "
-                    f"font-size: 13px; font-weight: 700; padding: 0; color: %s; }} QPushButton:hover {{ background: {t['hover']}; }}")
-        star = QPushButton("★" if fav else "☆")
-        star.setFixedSize(26, 22)
-        star.setToolTip("Add/remove favorite")
-        star.setStyleSheet(icon_css % ("#FFD700" if fav else t["muted"]))
-        star.clicked.connect(lambda: self.toggle_favorite(pr))
-        bottom.addWidget(star)
-        talk = QPushButton("💬")
-        talk.setFixedSize(26, 22)
-        talk.setToolTip("Read the conversation")
-        talk.setStyleSheet(icon_css % t["link"])
-        talk.clicked.connect(lambda: PRConversationDialog(self, pr, self.dark).exec())
-        bottom.addWidget(talk)
-        web = QPushButton("↗")
-        web.setFixedSize(26, 22)
-        web.setToolTip("Open on GitHub")
-        web.setStyleSheet(icon_css % t["link"])
-        web.clicked.connect(lambda: webbrowser.open(f"{REPO_URL}/pull/{num}"))
-        bottom.addWidget(web)
-        test = button("Test", "warning", lambda: self.use_pr(pr))
-        test.setFixedHeight(22)
-        bottom.addWidget(test)
+        for name, tip, slot in (("star_filled" if fav else "star", "Add/remove favorite", lambda: self.toggle_favorite(pr)),
+                                ("comment", "Read the conversation", lambda: PRConversationDialog(self, pr, self.dark).exec()),
+                                ("external", "Open on GitHub", lambda: webbrowser.open(f"{REPO_URL}/pull/{num}"))):
+            b = button("", "ghost", slot, tip, name, d)
+            b.setFixedSize(28, 24)
+            if name == "star_filled":
+                b.setIcon(icon(name, theme(d)["warning"]))
+            bottom.addWidget(b)
+        bottom.addWidget(button("Test", None, lambda: self.use_pr(pr), "Put this PR in the test box below", None, d, small=True))
         lay.addLayout(bottom)
-        sep = QFrame()
-        sep.setFrameShape(QFrame.HLine)
-        sep.setStyleSheet(f"background-color: {t['border']}; border: none; max-height: 1px;")
-        lay.addWidget(sep)
+        lay.addSpacing(4)
+        lay.addWidget(rule())
         return w
 
     def toggle_favorite(self, pr):
@@ -2007,7 +2343,7 @@ class Launcher(QMainWindow):
         """(cargo path, extra env) for the first Rust toolchain found, or (None, {})."""
         homes = [self.config.get("cargo_home")] if self.config.get("cargo_home") else []
         homes += [os.path.join(self.install_dir, "toolchain", "cargo"), os.path.join(HOME, ".cargo"),
-                  os.path.join(HOME, "solidcraft-fork", "cargo")]
+                  os.path.join(HOME, "Applications", "solidcraft-fork", "cargo"), os.path.join(HOME, "solidcraft-fork", "cargo")]
         for home in homes:
             cargo = os.path.join(home, "bin", "cargo")
             if os.path.exists(cargo):
@@ -2050,8 +2386,9 @@ class Launcher(QMainWindow):
         if proc.returncode != 0:
             raise RuntimeError(f"{' '.join(cmd[:3])} failed (exit {proc.returncode})")
 
-    def _build(self, src, ref, build_id, display, log, status, is_cancelled, set_proc, confirm=None):
-        """Fetch `ref` (a PR number or "main"), check it out, cargo build, keep the binary."""
+    def _build(self, src, ref, build_id, display, log, status, is_cancelled, set_proc, confirm=None, fork=None):
+        """Fetch `ref` (a PR number, "main", or with `fork` = (owner/repo, branch) that fork's branch),
+        check it out, cargo build, keep the binary."""
         run = lambda cmd, cwd, env=None, on_line=None: self._run_logged(cmd, cwd, env, log, is_cancelled, set_proc, on_line)
         if not shutil.which("git"):
             raise RuntimeError("git is not installed (sudo dnf install git).")
@@ -2069,9 +2406,12 @@ class Launcher(QMainWindow):
             status("Stashing your local changes (git stash)…", 4)
             run(["git", "stash", "push", "-u", "-m", f"solidcraft-launcher: before {build_id}"], src)
         branch = f"solidcraft-launcher/{build_id}"
-        refspec = f"pull/{ref}/head" if ref != "main" else "main"
-        status(f"Fetching {refspec} from {REPO}…", 6)
-        run(["git", "fetch", "--force", f"{REPO_URL}.git", refspec], src)
+        if fork:
+            remote, refspec = f"https://github.com/{fork[0]}.git", fork[1]
+        else:
+            remote, refspec = f"{REPO_URL}.git", (f"pull/{ref}/head" if ref != "main" else "main")
+        status(f"Fetching {refspec} from {remote.removeprefix('https://github.com/').removesuffix('.git')}…", 6)
+        run(["git", "fetch", "--force", remote, refspec], src)
         run(["git", "checkout", "--force", "-B", branch, "FETCH_HEAD"], src)
         commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=src, capture_output=True, text=True).stdout.strip()
         try:
@@ -2099,8 +2439,10 @@ class Launcher(QMainWindow):
         else:
             shutil.copy2(built, dest)
         builds = [b for b in self.config.get("builds", []) if b.get("id") != build_id]
-        builds.insert(0, {"id": build_id, "path": dest, "display": display, "commit": commit,
-                          "built": time.strftime("%Y-%m-%d %H:%M")})
+        entry = {"id": build_id, "path": dest, "display": display, "commit": commit, "built": time.strftime("%Y-%m-%d %H:%M")}
+        if fork:
+            entry["fork"] = {"repo": fork[0], "branch": fork[1]}
+        builds.insert(0, entry)
         self.config["builds"] = builds
         self.save_config()
         return dest
@@ -2191,8 +2533,14 @@ class Launcher(QMainWindow):
 
     def build_from_source(self):
         """Guided: pick or clone the source, then build main, confirming each stage."""
+        self.guided_build("main", "main (built from source)", "Build SolidCraft main",
+                          "Update {src} to the latest main and build it?")
+
+    def guided_build(self, build_id, display, title, question, fork=None):
+        """Clone the source if needed, confirm, then build `fork`'s branch (or main) in a progress dialog."""
         src = self.source_dir()
         dlg = SourceBuildDialog(self, self.dark)
+        dlg.setWindowTitle(title)
         default_src = os.path.join(self.install_dir, "source", "solidcraft")
 
         def log(text):
@@ -2212,7 +2560,7 @@ class Launcher(QMainWindow):
                     if os.path.isdir(os.path.join(default_src, ".git")):
                         src = default_src
                     else:
-                        if not dlg.confirm("Clone SolidCraft", f"Clone {REPO_URL}\ninto {default_src}?\n\n(about 200 MB)"):
+                        if not dlg.confirm("Clone SolidCraft", f"Builds need a SolidCraft source folder.\n\nClone {REPO_URL}\ninto {default_src}?\n\n(about 200 MB)"):
                             raise BuildCancelled()
                         os.makedirs(os.path.dirname(default_src), exist_ok=True)
                         status("Cloning SolidCraft…", 1)
@@ -2221,13 +2569,12 @@ class Launcher(QMainWindow):
                         src = default_src
                     self.config["src_folder"] = src
                     self.save_config()
-                if not dlg.confirm("Build SolidCraft main",
-                                   f"Update {src} to the latest main and build it?\n\nThis takes several minutes and up to ~7 GB of "
-                                   "build files (\"Free build space\" deletes them afterwards). Uncommitted changes are stashed."):
+                if not dlg.confirm(title, question.format(src=src) + "\n\nThis takes several minutes and up to ~7 GB of build files "
+                                   "(\"Free build space\" deletes them afterwards). Uncommitted changes in the source folder are stashed."):
                     raise BuildCancelled()
-                self._build(src, "main", "main", "main (built from source)", log, status, lambda: dlg.cancelled,
-                            lambda p: setattr(dlg, "proc", p), confirm=dlg.confirm)
-                dlg.sig_done.emit(True, "Done. \"main (built from source)\" is under Other builds.")
+                self._build(src, "main", build_id, display, log, status, lambda: dlg.cancelled,
+                            lambda p: setattr(dlg, "proc", p), confirm=dlg.confirm, fork=fork)
+                dlg.sig_done.emit(True, f"Done. \"{display}\" is under Other builds.")
             except BuildCancelled:
                 dlg.sig_done.emit(False, "Cancelled.")
             except Exception as e:  # shown in the dialog with the log above it
@@ -2237,6 +2584,46 @@ class Launcher(QMainWindow):
         dlg.exec()
         self._update_pr_panel()
         self.refresh_local_versions()
+        built = next((v for v in self.local if v.get("meta", {}).get("id") == build_id), None)
+        if built:
+            self.config["last_other"] = built["path"]
+            self.select_kind("other")
+            self.refresh_local_versions()
+
+    def add_build(self):
+        dlg = AddBuildDialog(self)
+        if not dlg.exec():
+            return
+        if dlg.result_kind == "program":
+            path, name = dlg.result
+            same = next((v for v in self.local if os.path.realpath(v["path"]) == os.path.realpath(path)), None)
+            if same:
+                QMessageBox.information(self, "Add build", f"That program is already in the list as \"{same['display']}\".")
+                return
+            extras = [e for e in self.config.get("extra_versions", []) if e.get("path") != path]
+            extras.append({"display": name, "path": path})
+            self.config["extra_versions"] = extras
+            self.config["last_other"] = path
+            self.save_config()
+            self.selected_kind = "other"
+            self.refresh_local_versions()
+            self.select_kind("other")
+        else:
+            repo, branch, name = dlg.result
+            build_id = "fork-" + re.sub(r"[^a-z0-9]+", "-", f"{repo}-{branch}".lower()).strip("-")
+            self.guided_build(build_id, name, f"Build {repo} @ {branch}",
+                              f"Fetch {branch} from github.com/{repo} into {{src}} and build it?", fork=(repo, branch))
+
+    def rebuild_selected(self):
+        v = self.selected_version()
+        meta = (v or {}).get("meta") or {}
+        if meta.get("fork"):
+            f = meta["fork"]
+            self.guided_build(meta["id"], meta.get("display", v["display"]), f"Rebuild {f['repo']} @ {f['branch']}",
+                              f"Fetch the latest {f['branch']} from github.com/{f['repo']} into {{src}} and build it again?",
+                              fork=(f["repo"], f["branch"]))
+        elif meta.get("id") == "main":
+            self.build_from_source()
 
     def closeEvent(self, e):
         if self.build_proc is not None:
@@ -2256,6 +2643,7 @@ class Launcher(QMainWindow):
 # ---------- Single instance ----------
 
 def acquire_lock():
+    os.makedirs(CACHE_DIR, exist_ok=True)
     try:
         with open(LOCK_FILE, encoding="utf-8") as f:
             pid = int(f.read().strip())
@@ -2283,6 +2671,9 @@ def main():
     app.setDesktopFileName("solidcraft-launcher")
     app.setStyle("Fusion")
     app.setQuitOnLastWindowClosed(False)
+    load_fonts()
+    weights = WeightFilter(app)
+    app.installEventFilter(weights)
     if not acquire_lock():
         QMessageBox.warning(None, APP_NAME, "The launcher is already open in another window.")
         return 0

@@ -2,7 +2,8 @@
 
 Download, update and launch SolidCraft **stable** and **nightly** AppImages, test GitHub pull
 requests by building them with cargo, and open your projects with a chosen version.
-Modelled on [FreeCAD Smart Launcher](https://github.com/deltahedra3d/freecad-launcher) by Deltahedra.
+Modelled on [FreeCAD Smart Launcher](https://github.com/deltahedra3d/freecad-launcher) by Deltahedra,
+dressed in SolidCraft's own design language: its colours, IBM Plex fonts and icons (see LICENSE).
 Unofficial; not affiliated with the SolidCraft project.
 
 ## Use
@@ -11,12 +12,16 @@ Unofficial; not affiliated with the SolidCraft project.
 and `time_tracker.json` live in `~/Applications/SolidCraft` (changeable in the Download dialog).
 
 - **Versions**: stable and nightly from GitHub releases, plus your system install, the fork in
-  `~/solidcraft-fork` and PR builds under *Other builds*. Launched AppImages get
+  `~/Applications/solidcraft-fork` and PR builds under *Other builds*. Launched AppImages get
   `DESKTOPINTEGRATION` set, so they don't add their own menu entries; *Desktop entry* does that.
+- **Other builds → Add build…**: add any SolidCraft program or AppImage on disk (e.g. a fork you
+  build yourself; *Remove* only takes it off the list), or a **fork on GitHub** (`owner/repo` +
+  branch, with *List branches*): its branch is fetched into the source folder and built like a PR.
+  *Rebuild* fetches the latest commits of the selected fork (or main) build and builds it again.
 - **Pull requests**: browse, search, star, read the conversation. *Build* fetches the PR into the
   source folder (stashing local changes), runs `cargo build --release -p solidcraft` and keeps the
   binary in `~/Applications/SolidCraft/builds/`. It uses the first Rust toolchain it finds
-  (`~/.cargo`, `~/solidcraft-fork/cargo`, …) or installs one into the install folder.
+  (`~/.cargo`, `~/Applications/solidcraft-fork/cargo`, …) or installs one into the install folder.
   *Free build space* deletes the source's `target/` (several GB). Building a PR runs its code.
 - **Project library**: files under `~/CAD` plus SolidCraft's recent files; previews come from
   the selected version's `solidcraft-cli`; *3D view* uses F3D if installed. *Open in running

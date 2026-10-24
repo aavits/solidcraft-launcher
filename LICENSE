@@ -2,8 +2,14 @@ MIT License
 
 Copyright (c) 2026 joakim
 
-Layout, feature set and colour theme adapted from FreeCAD Smart Launcher,
+Layout and feature set adapted from FreeCAD Smart Launcher,
 Copyright (c) Deltahedra (https://github.com/deltahedra3d/freecad-launcher), MIT License.
+
+Look and feel follows SolidCraft (https://github.com/tangency-labs/solidcraft, MIT OR Apache-2.0):
+its colour tokens, and the icons in assets/icons that come from it (chevron, close, eye, folder,
+help, import_tray, plus, stop); the other icons there are drawn for this project in that style.
+The fonts in assets/fonts are IBM Plex Sans and IBM Plex Mono, (c) IBM Corp., licensed under
+the SIL Open Font License 1.1 (assets/fonts/OFL.txt).
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

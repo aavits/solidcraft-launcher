@@ -7,9 +7,9 @@ cd "$(dirname "$0")"
 VERSION=$(sed -n 's/^APP_VERSION = "\(.*\)"/\1/p' solidcraft_launcher.py)
 APPDIR=.build/SolidCraft_Launcher.AppDir
 
-.build-venv/bin/pyinstaller --noconfirm --clean --onedir --windowed \
+.build-venv/bin/python -m PyInstaller --noconfirm --clean --onedir --windowed \
     --name solidcraft-launcher \
-    --add-data "$PWD/icon.png:." \
+    --add-data "$PWD/icon.png:." --add-data "$PWD/assets:assets" \
     --exclude-module tkinter \
     --workpath .build/pyinstaller --distpath .build/dist --specpath .build \
     solidcraft_launcher.py
