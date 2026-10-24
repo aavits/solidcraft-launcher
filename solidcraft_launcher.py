@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "SolidCraft Launcher"
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.2.0"
 REPO = "tangency-labs/solidcraft"
 REPO_URL = f"https://github.com/{REPO}"
 API = f"https://api.github.com/repos/{REPO}"
