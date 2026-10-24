@@ -2420,7 +2420,21 @@ class Launcher(QMainWindow):
         except OSError:
             total = 600
         compiled = [0]
-        current = {"crate": None, "since": time.time(), "pct": 10}
+        started = time.time()
+        current = {"crate": None, "since": started, "pct": 10}
+        clock = lambda secs: f"{int(secs) // 60}:{int(secs) % 60:02d}"
+
+        def show():
+            # Total time always ticks; a crate that has been quiet for a while is named with its own
+            # time (the engine, UI and app crates compile for minutes without printing anything).
+            now = time.time()
+            head = f"Building {display} · {clock(now - started)}"
+            if not current["crate"]:
+                status(f"{head} · starting cargo…", current["pct"])
+            elif now - current["since"] >= 4:
+                status(f"{head} · still compiling {current['crate']}… {clock(now - current['since'])}", current["pct"])
+            else:
+                status(f"{head} · compiling {current['crate']}", current["pct"])
 
         def progress(line):
             if line.lstrip().startswith(("Compiling", "Checking")):
@@ -2428,18 +2442,13 @@ class Launcher(QMainWindow):
                 parts = line.split()
                 current.update(crate=parts[1] if len(parts) > 1 else None, since=time.time(),
                                pct=10 + min(85, compiled[0] * 85 // total))
-                status(f"Building {display}: {line.strip()[:80]}", current["pct"])
+                show()
 
         building = threading.Event()
 
         def heartbeat():
-            # The big crates (engine, UI, the app) compile for minutes without printing anything:
-            # say which one is still going, and for how long, so the build doesn't look stuck.
             while not building.wait(1.0):
-                quiet = time.time() - current["since"]
-                if current["crate"] and quiet >= 4:
-                    m, sec = divmod(int(quiet), 60)
-                    status(f"Building {display}: still compiling {current['crate']}… {m}:{sec:02d}", current["pct"])
+                show()
 
         status(f"Building {display} with cargo (several minutes)…", 10)
         threading.Thread(target=heartbeat, daemon=True).start()
