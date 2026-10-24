@@ -7,7 +7,7 @@ Unofficial; not affiliated with the SolidCraft project.
 
 ## Use
 
-`~/Applications/SolidCraft-Launcher` (menu: *SolidCraft Launcher*). Versions, `launcher_config.json`
+`~/Applications/SolidCraft_Launcher-<version>-x86_64.AppImage` (menu: *SolidCraft Launcher*). Versions, `launcher_config.json`
 and `time_tracker.json` live in `~/Applications/SolidCraft` (changeable in the Download dialog).
 
 - **Versions**: stable and nightly from GitHub releases, plus your system install, the fork in
@@ -27,6 +27,7 @@ and `time_tracker.json` live in `~/Applications/SolidCraft` (changeable in the D
 
     python3 -m venv --system-site-packages .build-venv
     .build-venv/bin/pip install pyinstaller
-    ./build.sh            # -> dist/SolidCraft-Launcher (one self-contained file, ~125 MB)
+    # tools/appimagetool-x86_64.AppImage from github.com/AppImage/appimagetool/releases
+    ./build.sh            # -> dist/SolidCraft_Launcher-<version>-x86_64.AppImage (~115 MB)
 
 Run from source: `python3 solidcraft_launcher.py` (needs PySide6).
