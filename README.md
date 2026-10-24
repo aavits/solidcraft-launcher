@@ -21,8 +21,12 @@ Grab `SolidCraft_Launcher-<version>-x86_64.AppImage` from the
     chmod +x SolidCraft_Launcher-*-x86_64.AppImage
     ./SolidCraft_Launcher-*-x86_64.AppImage
 
-Linux x86_64 only. Everything it needs (Python, Qt, fonts) is inside. If it complains about FUSE,
-install `fuse2`/`libfuse2`, or run it with `--appimage-extract-and-run`.
+Everything it needs (Python, Qt, fonts) is inside. If it complains about FUSE, install
+`fuse2`/`libfuse2`, or run it with `--appimage-extract-and-run`.
+
+**Linux only (x86_64), and that's not changing on my end.** It manages SolidCraft's Linux
+AppImages, uses Linux menu entries and assumes Linux paths. Want a Windows or macOS version?
+It's MIT: fork it and have at it. A pull request is welcome too.
 
 ## Use
 
