@@ -13,7 +13,7 @@ Modelled on [FreeCAD Smart Launcher](https://github.com/deltahedra3d/freecad-lau
 dressed in SolidCraft's own design language: its colours, IBM Plex fonts and icons (see LICENSE).
 Unofficial; not affiliated with the SolidCraft project.
 
-![SolidCraft Launcher: versions, pull requests and the project library](docs/screenshot.png)
+![SolidCraft Launcher: versions, pull requests and the project library](docs/screenshot-0.2.2.png)
 
 ## Download
 
