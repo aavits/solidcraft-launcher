@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "SolidCraft Launcher"
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.2.1"
 REPO = "tangency-labs/solidcraft"
 REPO_URL = f"https://github.com/{REPO}"
 API = f"https://api.github.com/repos/{REPO}"
@@ -886,6 +886,7 @@ class SourceBuildDialog(QDialog):
     sig_log = Signal(str)
     sig_progress = Signal(int)
     sig_status = Signal(str)
+    sig_timer = Signal(str)
     sig_done = Signal(bool, str)
     sig_confirm = Signal(str, str)
 
@@ -903,6 +904,10 @@ class SourceBuildDialog(QDialog):
         self.lbl.setObjectName("muted")
         self.lbl.setWordWrap(True)
         lay.addWidget(self.lbl)
+        self.lbl_timer = QLabel("")
+        self.lbl_timer.setObjectName("muted")
+        self.lbl_timer.hide()
+        lay.addWidget(self.lbl_timer)
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
         lay.addWidget(self.progress)
@@ -921,6 +926,7 @@ class SourceBuildDialog(QDialog):
         self.sig_log.connect(self._append)
         self.sig_progress.connect(self.progress.setValue)
         self.sig_status.connect(self.lbl.setText)
+        self.sig_timer.connect(lambda t: (self.lbl_timer.setText(t), self.lbl_timer.show()))
         self.sig_done.connect(self._done)
         self.sig_confirm.connect(self._ask)
 
@@ -992,6 +998,7 @@ class Signals(QObject):
     prs_search_error = Signal(str)
     pr_meta = Signal(dict)
     pr_build_status = Signal(str, int)
+    pr_build_timer = Signal(str)
     pr_build_done = Signal(bool, str)
     preview = Signal(str, str, str)  # project path, png path ("" = none), message
     projects = Signal(list)
@@ -1351,6 +1358,10 @@ class Launcher(QMainWindow):
         self.lbl_pr_status = ElidedLabel("Ready.")
         self.lbl_pr_status.setObjectName("muted")
         rl.addWidget(self.lbl_pr_status)
+        self.lbl_pr_timer = ElidedLabel("")
+        self.lbl_pr_timer.setObjectName("muted")
+        self.lbl_pr_timer.hide()
+        rl.addWidget(self.lbl_pr_timer)
         xrow = QHBoxLayout()
         xrow.addWidget(button("Build SolidCraft main…", None, self.build_from_source, "Update the source folder to main and build it", "build", d))
         xrow.addWidget(button("Free build space", None, self.free_build_space, "Delete the source folder's cargo build files (target/)", "trash", d))
@@ -1456,6 +1467,7 @@ class Launcher(QMainWindow):
         s.prs_search_error.connect(lambda e: self.render_error(self.pr_search_layout, e))
         s.pr_meta.connect(self.on_pr_meta)
         s.pr_build_status.connect(self.on_build_status)
+        s.pr_build_timer.connect(lambda t: (self.lbl_pr_timer.setText(t), self.lbl_pr_timer.show()))
         s.pr_build_done.connect(self.on_build_done)
         s.preview.connect(self.on_preview)
 
@@ -2386,7 +2398,7 @@ class Launcher(QMainWindow):
         if proc.returncode != 0:
             raise RuntimeError(f"{' '.join(cmd[:3])} failed (exit {proc.returncode})")
 
-    def _build(self, src, ref, build_id, display, log, status, is_cancelled, set_proc, confirm=None, fork=None):
+    def _build(self, src, ref, build_id, display, log, status, is_cancelled, set_proc, confirm=None, fork=None, timer=None):
         """Fetch `ref` (a PR number, "main", or with `fork` = (owner/repo, branch) that fork's branch),
         check it out, cargo build, keep the binary."""
         run = lambda cmd, cwd, env=None, on_line=None: self._run_logged(cmd, cwd, env, log, is_cancelled, set_proc, on_line)
@@ -2424,17 +2436,19 @@ class Launcher(QMainWindow):
         current = {"crate": None, "since": started, "pct": 10}
         clock = lambda secs: f"{int(secs) // 60}:{int(secs) % 60:02d}"
 
+        short = display.split(" – ")[0]
+
         def show():
-            # Total time always ticks; a crate that has been quiet for a while is named with its own
-            # time (the engine, UI and app crates compile for minutes without printing anything).
+            # The timer line under the status: total time always ticks, and a crate that has been
+            # quiet for a while gets its own time (the engine, UI and app compile for minutes silently).
             now = time.time()
-            head = f"Building {display} · {clock(now - started)}"
-            if not current["crate"]:
-                status(f"{head} · starting cargo…", current["pct"])
-            elif now - current["since"] >= 4:
-                status(f"{head} · still compiling {current['crate']}… {clock(now - current['since'])}", current["pct"])
+            text = f"Elapsed {clock(now - started)}"
+            if current["crate"] and now - current["since"] >= 4:
+                text += f" · still compiling {current['crate']}… {clock(now - current['since'])}"
+            if timer:
+                timer(text)
             else:
-                status(f"{head} · compiling {current['crate']}", current["pct"])
+                status(f"{text} · Building {short}", current["pct"])
 
         def progress(line):
             if line.lstrip().startswith(("Compiling", "Checking")):
@@ -2442,6 +2456,8 @@ class Launcher(QMainWindow):
                 parts = line.split()
                 current.update(crate=parts[1] if len(parts) > 1 else None, since=time.time(),
                                pct=10 + min(85, compiled[0] * 85 // total))
+                if timer:
+                    status(f"Building {short}: compiling {current['crate']}", current["pct"])
                 show()
 
         building = threading.Event()
@@ -2456,6 +2472,8 @@ class Launcher(QMainWindow):
             run([cargo, "build", "--release", "-p", "solidcraft"], src, cenv, progress)
         finally:
             building.set()
+        if timer:
+            timer(f"Compiled in {clock(time.time() - started)}")
         target = os.environ.get("CARGO_TARGET_DIR") or os.path.join(src, "target")
         built = os.path.join(target, "release", "solidcraft")
         dest_dir = os.path.join(self.install_dir, "builds")
@@ -2505,7 +2523,8 @@ class Launcher(QMainWindow):
         def work():
             try:
                 self._build(src, str(num), f"pr-{num}", display, log, lambda s, p: self.sig.pr_build_status.emit(s, p),
-                            lambda: self.build_cancel, lambda p: setattr(self, "build_proc", p))
+                            lambda: self.build_cancel, lambda p: setattr(self, "build_proc", p),
+                            timer=self.sig.pr_build_timer.emit)
                 self.sig.pr_build_done.emit(True, f"Built {display}. Launch it, or find it under Other builds.")
             except BuildCancelled:
                 self.sig.pr_build_done.emit(False, "Build stopped.")
@@ -2601,7 +2620,7 @@ class Launcher(QMainWindow):
                                    "(\"Free build space\" deletes them afterwards). Uncommitted changes in the source folder are stashed."):
                     raise BuildCancelled()
                 self._build(src, "main", build_id, display, log, status, lambda: dlg.cancelled,
-                            lambda p: setattr(dlg, "proc", p), confirm=dlg.confirm, fork=fork)
+                            lambda p: setattr(dlg, "proc", p), confirm=dlg.confirm, fork=fork, timer=dlg.sig_timer.emit)
                 dlg.sig_done.emit(True, f"Done. \"{display}\" is under Other builds.")
             except BuildCancelled:
                 dlg.sig_done.emit(False, "Cancelled.")
