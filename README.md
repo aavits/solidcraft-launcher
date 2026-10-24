@@ -1,5 +1,12 @@
 # SolidCraft Launcher
 
+> [!WARNING]
+> **Certified 100% artisanal AI slop.** Not a single line of this was typed by a human. An AI read
+> someone else's launcher, borrowed the layout, borrowed SolidCraft's colours, fonts and icons,
+> and stitched it all together while a human said "push it" at regular intervals.
+> Everything borrowed is credited and MIT/OFL-licensed, so it's technically *legal* slop.
+> It works on my machine. Your mileage may vary. No warranty, no refunds, no shame.
+
 Download, update and launch SolidCraft **stable** and **nightly** AppImages, test GitHub pull
 requests by building them with cargo, and open your projects with a chosen version.
 Modelled on [FreeCAD Smart Launcher](https://github.com/deltahedra3d/freecad-launcher) by Deltahedra,
