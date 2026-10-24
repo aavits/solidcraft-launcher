@@ -13,6 +13,17 @@ Modelled on [FreeCAD Smart Launcher](https://github.com/deltahedra3d/freecad-lau
 dressed in SolidCraft's own design language: its colours, IBM Plex fonts and icons (see LICENSE).
 Unofficial; not affiliated with the SolidCraft project.
 
+## Download
+
+Grab `SolidCraft_Launcher-<version>-x86_64.AppImage` from the
+[latest release](https://github.com/aavits/solidcraft-launcher/releases/latest), then:
+
+    chmod +x SolidCraft_Launcher-*-x86_64.AppImage
+    ./SolidCraft_Launcher-*-x86_64.AppImage
+
+Linux x86_64 only. Everything it needs (Python, Qt, fonts) is inside. If it complains about FUSE,
+install `fuse2`/`libfuse2`, or run it with `--appimage-extract-and-run`.
+
 ## Use
 
 `~/Applications/SolidCraft_Launcher-<version>-x86_64.AppImage` (menu: *SolidCraft Launcher*). Versions, `launcher_config.json`
