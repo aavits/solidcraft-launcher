@@ -2420,14 +2420,33 @@ class Launcher(QMainWindow):
         except OSError:
             total = 600
         compiled = [0]
+        current = {"crate": None, "since": time.time(), "pct": 10}
 
         def progress(line):
             if line.lstrip().startswith(("Compiling", "Checking")):
                 compiled[0] += 1
-                status(f"Building {display}: {line.strip()[:80]}", 10 + min(85, compiled[0] * 85 // total))
+                parts = line.split()
+                current.update(crate=parts[1] if len(parts) > 1 else None, since=time.time(),
+                               pct=10 + min(85, compiled[0] * 85 // total))
+                status(f"Building {display}: {line.strip()[:80]}", current["pct"])
+
+        building = threading.Event()
+
+        def heartbeat():
+            # The big crates (engine, UI, the app) compile for minutes without printing anything:
+            # say which one is still going, and for how long, so the build doesn't look stuck.
+            while not building.wait(1.0):
+                quiet = time.time() - current["since"]
+                if current["crate"] and quiet >= 4:
+                    m, sec = divmod(int(quiet), 60)
+                    status(f"Building {display}: still compiling {current['crate']}… {m}:{sec:02d}", current["pct"])
 
         status(f"Building {display} with cargo (several minutes)…", 10)
-        run([cargo, "build", "--release", "-p", "solidcraft"], src, cenv, progress)
+        threading.Thread(target=heartbeat, daemon=True).start()
+        try:
+            run([cargo, "build", "--release", "-p", "solidcraft"], src, cenv, progress)
+        finally:
+            building.set()
         target = os.environ.get("CARGO_TARGET_DIR") or os.path.join(src, "target")
         built = os.path.join(target, "release", "solidcraft")
         dest_dir = os.path.join(self.install_dir, "builds")
