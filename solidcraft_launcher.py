@@ -28,6 +28,7 @@ import urllib.request
 import webbrowser
 
 from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer, Signal
+from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtGui import QFont, QIcon, QImage, QPixmap, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout,
@@ -37,7 +38,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "SolidCraft Launcher"
-APP_VERSION = "0.2.1"
+APP_VERSION = "0.2.2"
 REPO = "tangency-labs/solidcraft"
 REPO_URL = f"https://github.com/{REPO}"
 API = f"https://api.github.com/repos/{REPO}"
@@ -328,6 +329,10 @@ def make_qss(dark):
     QScrollBar::handle:vertical {{ background: {t['control_border']}; border-radius: 3px; min-height: 28px; }}
     QScrollBar::handle:vertical:hover {{ background: {t['dim']}; }}
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical, QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ height: 0; background: none; }}
+    QScrollBar:horizontal {{ background: transparent; height: 8px; margin: 2px; }}
+    QScrollBar::handle:horizontal {{ background: {t['control_border']}; border-radius: 3px; min-width: 28px; }}
+    QScrollBar::handle:horizontal:hover {{ background: {t['dim']}; }}
+    QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal, QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{ width: 0; background: none; }}
 
     QTextEdit, QTextBrowser {{ background-color: {t['field']}; color: {t['text']}; border: 1px solid {t['border']}; border-radius: 8px; }}
     QTextEdit {{ font-family: "{MONO}"; font-size: 11.5px; }}
@@ -1030,6 +1035,7 @@ class Launcher(QMainWindow):
         self.current_pr = None
         self.build_proc = None
         self.build_cancel = False
+        self.building = False
         self.projects = {}
         self._preview_for = None
         self._update_prompted = False
@@ -1039,6 +1045,7 @@ class Launcher(QMainWindow):
         if icon:
             self.setWindowIcon(QIcon(icon))
         self.resize(1300, 840)
+        self.setMinimumSize(720, 560)
         self.setStyleSheet(make_qss(self.dark))
         self.build_ui()
         self.connect_signals()
@@ -1154,8 +1161,15 @@ class Launcher(QMainWindow):
         bl.addWidget(ver)
         outer.addWidget(bar)
 
+        # The three columns need ~1230 px; a narrower window (half a screen) scrolls them sideways.
+        body_scroll = QScrollArea()
+        body_scroll.setWidgetResizable(True)
+        body_scroll.setFrameShape(QFrame.NoFrame)
+        body_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        outer.addWidget(body_scroll, 1)
         body = QWidget()
-        outer.addWidget(body, 1)
+        body.setObjectName("scrollInner")
+        body_scroll.setWidget(body)
         bod = QVBoxLayout(body)
         bod.setContentsMargins(16, 14, 16, 10)
         bod.setSpacing(10)
@@ -2510,6 +2524,7 @@ class Launcher(QMainWindow):
         title = (self.current_pr or {}).get("title", "")
         display = f"PR #{num}" + (f" – {title[:40]}" if title else "")
         self.build_cancel = False
+        self.building = True
         self.btn_build.setEnabled(False)
         self.btn_stop.setEnabled(True)
         self.pr_progress.setValue(0)
@@ -2543,6 +2558,7 @@ class Launcher(QMainWindow):
         self.pr_progress.setValue(pct)
 
     def on_build_done(self, ok, message):
+        self.building = False
         self.btn_build.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self.pr_progress.setVisible(ok)
@@ -2672,8 +2688,14 @@ class Launcher(QMainWindow):
         elif meta.get("id") == "main":
             self.build_from_source()
 
+    def bring_forward(self):
+        """Another start of the launcher asked for this window (it may be hidden behind a running SolidCraft)."""
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
     def closeEvent(self, e):
-        if self.build_proc is not None:
+        if self.building:
             if QMessageBox.question(self, "Close", "A build is running. Stop it and close?") != QMessageBox.Yes:
                 e.ignore()
                 return
@@ -2688,28 +2710,37 @@ class Launcher(QMainWindow):
 
 
 # ---------- Single instance ----------
+# The first launcher listens on a local socket; a second start asks it to show its window (it may be
+# hidden while a SolidCraft it started is still running) and exits.
 
-def acquire_lock():
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    try:
-        with open(LOCK_FILE, encoding="utf-8") as f:
-            pid = int(f.read().strip())
-        if pid != os.getpid() and os.path.exists(f"/proc/{pid}"):
-            return False
-    except (OSError, ValueError):
-        pass
-    with open(LOCK_FILE, "w", encoding="utf-8") as f:
-        f.write(str(os.getpid()))
+SERVER_NAME = f"solidcraft-launcher-{os.getuid()}"
+
+
+def show_running_instance():
+    sock = QLocalSocket()
+    sock.connectToServer(SERVER_NAME)
+    if not sock.waitForConnected(500):
+        return False
+    sock.write(b"show\n")
+    sock.flush()
+    sock.waitForBytesWritten(500)
+    sock.disconnectFromServer()
     return True
 
 
-def release_lock():
-    try:
-        with open(LOCK_FILE, encoding="utf-8") as f:
-            if int(f.read().strip()) == os.getpid():
-                os.remove(LOCK_FILE)
-    except (OSError, ValueError):
-        pass
+def listen_for_instances(win):
+    QLocalServer.removeServer(SERVER_NAME)  # a socket left by a launcher that crashed
+    server = QLocalServer(win)
+    server.listen(SERVER_NAME)
+
+    def on_connection():
+        conn = server.nextPendingConnection()
+        if conn:
+            conn.disconnectFromServer()
+        win.bring_forward()
+
+    server.newConnection.connect(on_connection)
+    return server
 
 
 def main():
@@ -2721,11 +2752,13 @@ def main():
     load_fonts()
     weights = WeightFilter(app)
     app.installEventFilter(weights)
-    if not acquire_lock():
-        QMessageBox.warning(None, APP_NAME, "The launcher is already open in another window.")
+    testing = bool(os.environ.get("SCL_SCREENSHOT"))
+    if not testing and show_running_instance():
         return 0
     try:
         win = Launcher()
+        if not testing:
+            win._instance_server = listen_for_instances(win)
         win.show()
         shot = os.environ.get("SCL_SCREENSHOT")  # testing: save a picture of the window, then quit
         if shot:
@@ -2733,7 +2766,10 @@ def main():
                               lambda: (win.grab().save(shot), QApplication.quit()))
         return app.exec()
     finally:
-        release_lock()
+        try:
+            os.remove(LOCK_FILE)  # left by 0.2.1 and earlier
+        except OSError:
+            pass
 
 
 if __name__ == "__main__":
