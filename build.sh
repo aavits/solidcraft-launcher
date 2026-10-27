@@ -17,6 +17,14 @@ APPDIR=.build/SolidCraft_Launcher.AppDir
 rm -rf "$APPDIR"
 mkdir -p "$APPDIR/usr/lib"
 cp -a .build/dist/solidcraft-launcher "$APPDIR/usr/lib/"
+# GNOME draws no title bars for Wayland apps; without this Qt falls back to its plain "bradient" one.
+# Comes from qt6-qtwayland-adwaita-decoration and must match the bundled Qt (both from the system).
+ADW=/usr/lib64/qt6/plugins/wayland-decoration-client/libadwaita.so
+if [ -f "$ADW" ]; then
+    cp "$ADW" "$APPDIR/usr/lib/solidcraft-launcher/_internal/PySide6/Qt/plugins/wayland-decoration-client/"
+else
+    echo "warning: $ADW missing (install qt6-qtwayland-adwaita-decoration); GNOME gets Qt's plain title bar" >&2
+fi
 cp icon.png "$APPDIR/solidcraft-launcher.png"
 cat > "$APPDIR/solidcraft-launcher.desktop" <<EOF
 [Desktop Entry]

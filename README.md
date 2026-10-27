@@ -9,8 +9,10 @@
 
 Download, update and launch SolidCraft **stable** and **nightly** AppImages, test GitHub pull
 requests by building them with cargo, and open your projects with a chosen version.
-Modelled on [FreeCAD Smart Launcher](https://github.com/deltahedra3d/freecad-launcher) by Deltahedra,
-dressed in SolidCraft's own design language: its colours, IBM Plex fonts and icons (see LICENSE).
+Modelled on [FreeCAD Smart Launcher](https://github.com/deltahedra3d/freecad-launcher) by Deltahedra.
+It follows your desktop's look (colours, accent, light/dark, font; Breeze controls on KDE, Adwaita
+colours on GNOME), or turn on *SolidCraft look* for SolidCraft's own design language: its colours,
+IBM Plex fonts and icons (see LICENSE).
 Unofficial; not affiliated with the SolidCraft project.
 
 ![SolidCraft Launcher: versions, pull requests and the project library](docs/screenshot-0.2.2.png)
@@ -54,6 +56,8 @@ and `time_tracker.json` live in `~/Applications/SolidCraft` (changeable in the D
 
 ## Build
 
+    # PySide6 from the distro (Fedora: python3-pyside6), plus qt6-qtwayland-adwaita-decoration
+    # for a GNOME title bar
     python3 -m venv --system-site-packages .build-venv
     .build-venv/bin/pip install pyinstaller
     # tools/appimagetool-x86_64.AppImage from github.com/AppImage/appimagetool/releases

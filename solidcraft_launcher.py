@@ -29,7 +29,7 @@ import webbrowser
 
 from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer, Signal
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
-from PySide6.QtGui import QFont, QIcon, QImage, QPixmap, QTextCursor, QTextDocument
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QImage, QPalette, QPixmap, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout,
     QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox,
@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "SolidCraft Launcher"
-APP_VERSION = "0.2.2"
+APP_VERSION = "0.2.3"
 REPO = "tangency-labs/solidcraft"
 REPO_URL = f"https://github.com/{REPO}"
 API = f"https://api.github.com/repos/{REPO}"
@@ -161,6 +161,7 @@ DARK = {
     "field": "#1e2229", "hover": "#363d4a", "error": "#f06460", "warning": "#ecaa46",
     "ok_bg": "#2c4a33", "ok_ink": "#8fd19e", "warn_bg": "#43331c", "warn_ink": "#f5cc89",
     "pill_bg": "#2f343e", "merged": "#b39bee", "card_hi": "#1b3048", "card_hi_border": "#2a5c9b",
+    "on_primary": "#ffffff",
 }
 LIGHT = {
     "app_bar": "#343840", "app_bar_text": "#e6eaf2", "app_bar_sep": "#4f5562", "app_bar_hover": "#40454e",
@@ -170,14 +171,100 @@ LIGHT = {
     "field": "#ffffff", "hover": "#e2eaf6", "error": "#d63636", "warning": "#de961e",
     "ok_bg": "#e5f2e6", "ok_ink": "#276b2c", "warn_bg": "#fff6e5", "warn_ink": "#7a4a05",
     "pill_bg": "#eceef2", "merged": "#7349cd", "card_hi": "#e3f0fb", "card_hi_border": "#328bd3",
+    "on_primary": "#ffffff",
 }
 
 SANS = "IBM Plex Sans"
 MONO = "IBM Plex Mono"
+PLEX = (SANS, MONO)  # SolidCraft's faces, as registered by load_fonts()
+
+# By default the launcher follows the desktop: its palette, accent, light/dark, font and Qt style
+# (Breeze on KDE; GNOME has no Qt style of its own, so Fusion in GNOME's colours there).
+# The "SolidCraft look" option brings back the app's own design.
+NATIVE_STYLE = "Fusion"  # the desktop's Qt style, read in main() before anything changes it
+SYSTEM = None            # tokens taken from the desktop palette while following it, else None
+
+# Qt has no GNOME palette (its GTK3 one is light Adwaita whatever the dark setting), so use libadwaita's.
+ADWAITA = {
+    True: {"bg": "#222226", "text": "#ffffff", "base": "#1d1d20", "button": "#38383c"},
+    False: {"bg": "#fafafb", "text": "#323235", "base": "#ffffff", "button": "#ebebec"},
+}
+ADWAITA_ACCENTS = {"blue": "#3584e4", "teal": "#2190a4", "green": "#3a944a", "yellow": "#c88800", "orange": "#ed5b00",
+                   "red": "#e62d42", "pink": "#d56199", "purple": "#9141ac", "slate": "#6f8396"}
+
+
+def is_gnome():
+    return "GNOME" in os.environ.get("XDG_CURRENT_DESKTOP", "").upper().split(":")
+
+
+def gnome_accent():
+    try:
+        out = subprocess.run(["gsettings", "get", "org.gnome.desktop.interface", "accent-color"],
+                             capture_output=True, text=True, timeout=2).stdout
+    except (OSError, subprocess.SubprocessError):
+        out = ""
+    return ADWAITA_ACCENTS.get(out.strip().strip("'"), ADWAITA_ACCENTS["blue"])
+
+
+def system_dark():
+    scheme = QApplication.styleHints().colorScheme()
+    if scheme != Qt.ColorScheme.Unknown:
+        return scheme == Qt.ColorScheme.Dark
+    return QApplication.palette().color(QPalette.Window).lightness() < 128
+
+
+def mix(a, b, f):
+    a, b = QColor(a), QColor(b)
+    return QColor.fromRgbF(*(x + (y - x) * f for x, y in zip(a.getRgbF()[:3], b.getRgbF()[:3]))).name()
+
+
+def system_tokens(dark):
+    """SolidCraft's token set rebuilt from the desktop palette. Status colours (ok, warning, error) stay SolidCraft's."""
+    p = QApplication.palette()
+    bg, text, base, btn = (p.color(r) for r in (QPalette.Window, QPalette.WindowText, QPalette.Base, QPalette.Button))
+    accent = p.color(QPalette.Accent)
+    if is_gnome():
+        bg, text, base, btn = (QColor(ADWAITA[dark][k]) for k in ("bg", "text", "base", "button"))
+        accent = QColor(gnome_accent())
+    card = mix(bg, text, 0.05) if dark else base.name()
+    hover, border = mix(card, text, 0.09), mix(card, text, 0.14)
+    t = dict(DARK if dark else LIGHT)
+    t.update({
+        "app_bar": bg.name(), "app_bar_text": text.name(), "app_bar_sep": border, "app_bar_hover": hover,
+        "bg": bg.name(), "card": card, "header": mix(card, text, 0.06), "border": border, "rule": mix(card, text, 0.09),
+        "text": text.name(), "dim": mix(text, bg, 0.45), "accent": accent.name(), "primary": accent.name(),
+        "primary_hover": accent.lighter(112).name(), "on_primary": p.color(QPalette.HighlightedText).name(),
+        "accent_soft": mix(card, accent, 0.22), "selected_ink": mix(text, accent, 0.5),
+        "control": btn.name(), "control_border": mix(btn, text, 0.25), "field": base.name(), "hover": hover,
+        "pill_bg": mix(card, text, 0.06), "card_hi": mix(card, accent, 0.12), "card_hi_border": accent.name(),
+    })
+    return t
+
+
+def set_look(solidcraft):
+    """Switch to SolidCraft's own design or (re-)read the desktop's. Returns whether it's dark."""
+    global SYSTEM, SANS, MONO
+    app = QApplication.instance()
+    style = "Fusion" if solidcraft else NATIVE_STYLE
+    if app.style().name().lower() != style.lower():
+        app.setStyle(style)
+    dark = system_dark()
+    if solidcraft:
+        SYSTEM, (SANS, MONO) = None, PLEX
+    else:
+        SYSTEM = system_tokens(dark)
+        f = app.font()
+        SANS, MONO = f.family(), QFontDatabase.systemFont(QFontDatabase.FixedFont).family()
+    return dark
 
 
 def theme(dark):
-    return DARK if dark else LIGHT
+    return SYSTEM or (DARK if dark else LIGHT)
+
+
+def native_controls():
+    """Following a desktop with a real Qt style of its own: leave buttons, fields, tabs... to it."""
+    return SYSTEM is not None and NATIVE_STYLE.lower() != "fusion"
 
 
 def asset(*parts):
@@ -191,14 +278,14 @@ def asset(*parts):
 
 def load_fonts():
     """Register SolidCraft's IBM Plex faces; fall back to the system sans if they're missing."""
-    global SANS, MONO
-    from PySide6.QtGui import QFontDatabase
+    global SANS, MONO, PLEX
     for name, var in (("IBMPlexSans-Variable.ttf", "SANS"), ("IBMPlexMono-Regular.ttf", "MONO")):
         p = asset("fonts", name)
         fid = QFontDatabase.addApplicationFont(p) if p else -1
         families = QFontDatabase.applicationFontFamilies(fid) if fid != -1 else []
         if families:
             globals()[var] = families[0]
+    PLEX = (SANS, MONO)
 
 
 # Real interface weights from the variable font (Qt ignores font-weight for it; the wght axis works).
@@ -210,7 +297,7 @@ class WeightFilter(QObject):
     """Gives each widget SolidCraft's weight for its role as it is polished (styled)."""
 
     def eventFilter(self, obj, event):
-        if event.type() == QEvent.Polish and isinstance(obj, QWidget):
+        if event.type() == QEvent.Polish and isinstance(obj, QWidget) and SANS == PLEX[0]:
             weight = WEIGHTS.get(obj.objectName())
             if weight is None and isinstance(obj, (QPushButton, QTabBar)):
                 weight = 500
@@ -242,8 +329,8 @@ def icon(name, color):
 def make_qss(dark):
     t = theme(dark)
     chev = tinted_svg("chevron", t["dim"])
-    tick = tinted_svg("check", "#ffffff")
-    return f"""
+    tick = tinted_svg("check", t["on_primary"])
+    qss = f"""
     * {{ font-family: "{SANS}"; }}
     QMainWindow, QDialog {{ background-color: {t['bg']}; color: {t['text']}; }}
     QDialog {{ background-color: {t['card']}; }}
@@ -278,27 +365,9 @@ def make_qss(dark):
     QLabel#pillMerged {{ background-color: {t['pill_bg']}; color: {t['merged']}; }}
     QLabel#pillError {{ background-color: {t['pill_bg']}; color: {t['error']}; }}
 
-    QPushButton {{ background-color: {t['control']}; color: {t['text']}; border: 1px solid {t['control_border']};
-        border-radius: 6px; padding: 0 12px; min-height: 26px; max-height: 26px; font-size: 12.5px; font-weight: 500; }}
-    QPushButton:hover {{ background-color: {t['hover']}; }}
-    QPushButton:pressed {{ background-color: {t['accent_soft']}; }}
-    QPushButton:disabled {{ color: {t['dim']}; border-color: {t['rule']}; background-color: {t['card']}; }}
-    QPushButton#primary {{ background-color: {t['primary']}; border-color: {t['primary']}; color: #ffffff; font-weight: 600; }}
-    QPushButton#primary:hover {{ background-color: {t['primary_hover']}; border-color: {t['primary_hover']}; }}
-    QPushButton#primary:disabled {{ background-color: {t['accent_soft']}; border-color: {t['accent_soft']}; color: {t['dim']}; }}
     QPushButton#danger {{ color: {t['error']}; }}
     QPushButton#ghost {{ background: transparent; border: 1px solid transparent; padding: 0 6px; }}
     QPushButton#ghost:hover {{ background-color: {t['hover']}; }}
-    QPushButton#small {{ min-height: 22px; max-height: 22px; padding: 0 9px; font-size: 11.5px; }}
-
-    QLineEdit, QComboBox {{ background-color: {t['control']}; color: {t['text']}; border: 1px solid {t['control_border']};
-        border-radius: 6px; padding: 0 8px; min-height: 26px; selection-background-color: {t['accent_soft']};
-        selection-color: {t['selected_ink']}; }}
-    QLineEdit:focus, QComboBox:focus, QComboBox:on {{ border-color: {t['accent']}; }}
-    QComboBox::drop-down {{ border: none; width: 24px; }}
-    QComboBox::down-arrow {{ image: url("{chev}"); width: 14px; height: 14px; }}
-    QComboBox QAbstractItemView {{ background-color: {t['card']}; color: {t['text']}; border: 1px solid {t['border']};
-        selection-background-color: {t['accent_soft']}; selection-color: {t['selected_ink']}; outline: none; padding: 4px; }}
 
     QListWidget {{ background-color: {t['card']}; border: 1px solid {t['border']}; border-radius: 8px; outline: none; padding: 4px; }}
     QListWidget::item {{ border-radius: 6px; padding: 0; }}
@@ -310,21 +379,50 @@ def make_qss(dark):
     QHeaderView::section {{ background-color: {t['header']}; color: {t['dim']}; padding: 6px 8px; border: none;
         font-size: 10.5px; font-weight: 600; }}
 
+    QScrollArea {{ border: none; background: transparent; }}
+    QAbstractScrollArea > QWidget#qt_scrollarea_viewport, QWidget#scrollInner {{ background: transparent; }}
+
+    QTextEdit, QTextBrowser {{ background-color: {t['field']}; color: {t['text']}; border: 1px solid {t['border']}; border-radius: 8px; }}
+    QTextEdit {{ font-family: "{MONO}"; font-size: 11.5px; }}
+    QTextBrowser {{ font-family: "{SANS}"; font-size: 12.5px; }}
+    QProgressBar#thin {{ max-height: 6px; min-height: 6px; border: none; border-radius: 3px; background-color: {t['header']}; }}
+    """
+    if native_controls():
+        # The desktop's own Qt style (Breeze...) draws the standard controls; keep only emphasis.
+        qss += f"""
+    QPushButton#primary {{ font-weight: 600; }}
+    QProgressBar#thin::chunk {{ background-color: {t['accent']}; border-radius: 3px; }}
+    """
+    else:
+        qss += f"""
+    QPushButton {{ background-color: {t['control']}; color: {t['text']}; border: 1px solid {t['control_border']};
+        border-radius: 6px; padding: 0 12px; min-height: 26px; max-height: 26px; font-size: 12.5px; font-weight: 500; }}
+    QPushButton:hover {{ background-color: {t['hover']}; }}
+    QPushButton:pressed {{ background-color: {t['accent_soft']}; }}
+    QPushButton:disabled {{ color: {t['dim']}; border-color: {t['rule']}; background-color: {t['card']}; }}
+    QPushButton#primary {{ background-color: {t['primary']}; border-color: {t['primary']}; color: {t['on_primary']}; font-weight: 600; }}
+    QPushButton#primary:hover {{ background-color: {t['primary_hover']}; border-color: {t['primary_hover']}; }}
+    QPushButton#primary:disabled {{ background-color: {t['accent_soft']}; border-color: {t['accent_soft']}; color: {t['dim']}; }}
+    QPushButton#small {{ min-height: 22px; max-height: 22px; padding: 0 9px; font-size: 11.5px; }}
+    QLineEdit, QComboBox {{ background-color: {t['control']}; color: {t['text']}; border: 1px solid {t['control_border']};
+        border-radius: 6px; padding: 0 8px; min-height: 26px; selection-background-color: {t['accent_soft']};
+        selection-color: {t['selected_ink']}; }}
+    QLineEdit:focus, QComboBox:focus, QComboBox:on {{ border-color: {t['accent']}; }}
+    QComboBox::drop-down {{ border: none; width: 24px; }}
+    QComboBox::down-arrow {{ image: url("{chev}"); width: 14px; height: 14px; }}
+    QComboBox QAbstractItemView {{ background-color: {t['card']}; color: {t['text']}; border: 1px solid {t['border']};
+        selection-background-color: {t['accent_soft']}; selection-color: {t['selected_ink']}; outline: none; padding: 4px; }}
     QCheckBox {{ spacing: 8px; background: transparent; }}
     QCheckBox::indicator {{ width: 14px; height: 14px; border-radius: 3px; border: 1px solid {t['control_border']};
         background: {t['control']}; }}
     QCheckBox::indicator:hover {{ border-color: {t['accent']}; }}
     QCheckBox::indicator:checked {{ background-color: {t['accent']}; border-color: {t['accent']}; image: url("{tick}"); }}
-
     QTabWidget::pane {{ border: none; background: transparent; top: 2px; }}
     QTabBar {{ qproperty-drawBase: 0; }}
     QTabBar::tab {{ background: transparent; color: {t['dim']}; padding: 4px 12px; margin-right: 4px; border-radius: 6px;
         font-weight: 500; }}
     QTabBar::tab:selected {{ background-color: {t['accent_soft']}; color: {t['selected_ink']}; font-weight: 600; }}
     QTabBar::tab:hover:!selected {{ background-color: {t['hover']}; color: {t['text']}; }}
-
-    QScrollArea {{ border: none; background: transparent; }}
-    QAbstractScrollArea > QWidget#qt_scrollarea_viewport, QWidget#scrollInner {{ background: transparent; }}
     QScrollBar:vertical {{ background: transparent; width: 8px; margin: 2px; }}
     QScrollBar::handle:vertical {{ background: {t['control_border']}; border-radius: 3px; min-height: 28px; }}
     QScrollBar::handle:vertical:hover {{ background: {t['dim']}; }}
@@ -333,16 +431,11 @@ def make_qss(dark):
     QScrollBar::handle:horizontal {{ background: {t['control_border']}; border-radius: 3px; min-width: 28px; }}
     QScrollBar::handle:horizontal:hover {{ background: {t['dim']}; }}
     QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal, QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{ width: 0; background: none; }}
-
-    QTextEdit, QTextBrowser {{ background-color: {t['field']}; color: {t['text']}; border: 1px solid {t['border']}; border-radius: 8px; }}
-    QTextEdit {{ font-family: "{MONO}"; font-size: 11.5px; }}
-    QTextBrowser {{ font-family: "{SANS}"; font-size: 12.5px; }}
     QProgressBar {{ background-color: {t['control']}; border: 1px solid {t['border']}; border-radius: 4px; color: {t['text']};
         text-align: center; font-size: 10.5px; font-weight: 600; }}
     QProgressBar::chunk {{ background-color: {t['accent']}; border-radius: 3px; }}
-    QProgressBar#thin {{ max-height: 6px; min-height: 6px; border: none; border-radius: 3px; background-color: {t['header']}; }}
     """
-
+    return qss
 
 # ---------- Small widgets ----------
 
@@ -419,7 +512,8 @@ _ICON_BUTTONS = []
 
 def icon_color(role, dark):
     t = theme(dark)
-    return {"primary": "#ffffff", "danger": t["error"]}.get(role, t["text"] if role != "appBarButton" else t["app_bar_text"])
+    primary = t["text"] if native_controls() else t["on_primary"]  # native primary buttons aren't filled
+    return {"primary": primary, "danger": t["error"]}.get(role, t["text"] if role != "appBarButton" else t["app_bar_text"])
 
 
 def retint_icons(dark):
@@ -1023,7 +1117,9 @@ class Launcher(QMainWindow):
             self.config["extra_versions"] = [{"display": "Fork (~/Applications/solidcraft-fork)", "path": fork}] if os.path.exists(fork) else []
             self.save_config()
         self.stats = self.load_stats()
-        self.dark = self.config.get("dark_mode", True)
+        self.dark = set_look(self.config.get("solidcraft_look", False))
+        self._look_pending = False
+        QApplication.styleHints().colorSchemeChanged.connect(lambda _: self.restyle_later())
         self.remote = {"stable": [], "nightly": []}
         self.remote_by_file = {}
         self.local = []
@@ -1249,10 +1345,11 @@ class Launcher(QMainWindow):
         self.chk_autoclose.setChecked(self.config.get("autoclose", False))
         self.chk_autoclose.toggled.connect(lambda v: self.set_option("autoclose", v))
         l4.addWidget(self.chk_autoclose)
-        self.chk_dark = QCheckBox("Dark mode")
-        self.chk_dark.setChecked(self.dark)
-        self.chk_dark.toggled.connect(self.toggle_dark)
-        l4.addWidget(self.chk_dark)
+        self.chk_look = QCheckBox("SolidCraft look")
+        self.chk_look.setChecked(self.config.get("solidcraft_look", False))
+        self.chk_look.setToolTip("Use SolidCraft's own colours and fonts instead of the desktop's")
+        self.chk_look.toggled.connect(lambda v: (self.set_option("solidcraft_look", v), self.apply_look()))
+        l4.addWidget(self.chk_look)
         self.chk_reminder = QCheckBox("Turn off update reminder")
         self.chk_reminder.setChecked(self.config.get("disable_update_reminder", False))
         self.chk_reminder.setToolTip("Don't show the startup window when a newer SolidCraft is available")
@@ -1313,7 +1410,7 @@ class Launcher(QMainWindow):
         ol = QVBoxLayout(onboard)
         ol.setContentsMargins(0, 0, 0, 0)
         ol.setSpacing(8)
-        msg = QLabel("Want to try a PR? You need a SolidCraft source folder (a git clone) first.")
+        msg = QLabel("Testing a PR needs a SolidCraft source folder (a git clone).")
         msg.setObjectName("muted")
         msg.setWordWrap(True)
         ol.addWidget(msg)
@@ -1489,12 +1586,24 @@ class Launcher(QMainWindow):
         self.config[key] = value
         self.save_config()
 
-    def toggle_dark(self, value):
-        self.dark = value
-        self.set_option("dark_mode", value)
-        self.setStyleSheet(make_qss(value))
-        retint_icons(value)
-        self.credit.setText(self.credit.text().replace(theme(not value)["dim"], theme(value)["dim"]))
+    def changeEvent(self, e):
+        # The desktop switched light/dark, accent or colour scheme: restyle once things settle.
+        if e.type() == QEvent.ApplicationPaletteChange and hasattr(self, "_look_pending"):
+            self.restyle_later()
+        super().changeEvent(e)
+
+    def restyle_later(self):
+        if not self._look_pending:
+            self._look_pending = True
+            QTimer.singleShot(0, self.apply_look)
+
+    def apply_look(self):
+        self._look_pending = False
+        old_dim = theme(self.dark)["dim"]
+        self.dark = set_look(self.config.get("solidcraft_look", False))
+        self.setStyleSheet(make_qss(self.dark))
+        retint_icons(self.dark)
+        self.credit.setText(self.credit.text().replace(old_dim, theme(self.dark)["dim"]))
         self.render_favorites()
         self.render_milestones(getattr(self, "_milestones", []))
         self.refresh_projects()
@@ -2744,10 +2853,13 @@ def listen_for_instances(win):
 
 
 def main():
+    if is_gnome():  # Qt's GTK3 theme ignores GNOME's dark setting; the portal one reports it (and its changes)
+        os.environ.setdefault("QT_QPA_PLATFORMTHEME", "xdgdesktopportal")
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setDesktopFileName("solidcraft-launcher")
-    app.setStyle("Fusion")
+    global NATIVE_STYLE
+    NATIVE_STYLE = app.style().name()  # the desktop's pick; set_look() swaps in Fusion for SolidCraft's look
     app.setQuitOnLastWindowClosed(False)
     load_fonts()
     weights = WeightFilter(app)
